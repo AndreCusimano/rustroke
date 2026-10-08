@@ -21,19 +21,24 @@
 //! Widgets are found by the label they report to screen readers (the
 //! visible text, or `accessible_label`). Text uses only the bundled font,
 //! so results are the same on every machine.
+//!
+//! [`Harness::render`] draws the last frame offscreen on the GPU, e.g. to
+//! save it as a PNG or compare it with a reference image.
 
+use std::path::Path;
 use std::time::Duration;
 
 use rustroke_core::{
-    Color, DisplayList, Event, Key, Modifiers, Point, PointerButton, RawInput, Rect, vec2,
+    Color, ColorImage, DisplayList, Event, Key, Modifiers, PhysicalSize, Point, PointerButton,
+    RawInput, Rect, Tessellator, TextureId, TexturesDelta, vec2,
 };
+use rustroke_render::{OffscreenRenderer, PaintJob, RendererError};
 use rustroke_text::Fonts;
 use rustroke_widgets::{Context, FrameOutput, WidgetDescription};
 
 use crate::{App, Frame};
 
 /// A window-less host for an [`App`]. See the [module docs](self).
-#[derive(Debug)]
 pub struct Harness {
     ctx: Context,
     fonts: Fonts,
@@ -45,6 +50,55 @@ pub struct Harness {
     shapes: DisplayList,
     output: FrameOutput,
     frames: u64,
+    /// Every texture still alive, for rendering (each frame's
+    /// `TexturesDelta` only has the changes).
+    textures: Vec<(TextureId, ColorImage)>,
+    renderer: Option<OffscreenRenderer>,
+}
+
+impl std::fmt::Debug for Harness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Harness")
+            .field("time", &self.time)
+            .field("screen_rect", &self.screen_rect)
+            .field("frames", &self.frames)
+            .finish_non_exhaustive()
+    }
+}
+
+/// An image of a frame: sRGB RGBA8 pixels, row by row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Screenshot {
+    /// Width and height in physical pixels.
+    pub size: [u32; 2],
+    /// `size[0] * size[1] * 4` bytes, top row first.
+    pub pixels: Vec<u8>,
+}
+
+impl Screenshot {
+    /// The color of pixel `(x, y)` as sRGB RGBA bytes.
+    pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        let i = ((y * self.size[0] + x) * 4) as usize;
+        [
+            self.pixels[i],
+            self.pixels[i + 1],
+            self.pixels[i + 2],
+            self.pixels[i + 3],
+        ]
+    }
+
+    /// Saves the image as a PNG file.
+    pub fn save_png(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+        let mut encoder = png::Encoder::new(file, self.size[0], self.size[1]);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+        encoder
+            .write_header()
+            .and_then(|mut w| w.write_image_data(&self.pixels))
+            .map_err(std::io::Error::other)
+    }
 }
 
 impl Default for Harness {
@@ -72,6 +126,8 @@ impl Harness {
             shapes: DisplayList::new(),
             output: FrameOutput::default(),
             frames: 0,
+            textures: Vec::new(),
+            renderer: None,
         }
     }
 
@@ -133,6 +189,12 @@ impl Harness {
         let mut output = self.ctx.end_frame();
         shapes.append(&mut output.shapes);
         self.shapes = shapes;
+        for (id, image) in &output.textures.set {
+            self.textures.retain(|(t, _)| t != id);
+            self.textures.push((*id, image.clone()));
+        }
+        self.textures
+            .retain(|(t, _)| !output.textures.free.contains(t));
         self.output = output;
         &self.output
     }
@@ -216,6 +278,51 @@ impl Harness {
         self.title.as_deref()
     }
 
+    /// Draws the last frame on the GPU, without a window. The first call
+    /// creates the renderer (slow, ~0.1 s); later calls reuse it. Fails
+    /// when the machine has no usable GPU adapter (e.g. some CI runners):
+    /// skip the check then.
+    ///
+    /// ```no_run
+    /// # use rustroke_winit::{Frame, testing::Harness};
+    /// let mut app = |frame: &mut Frame| {
+    ///     frame.ui(|ui| ui.label("Hello"));
+    /// };
+    /// let mut harness = Harness::new().with_pixels_per_point(2.0);
+    /// harness.run(&mut app);
+    /// if let Ok(image) = harness.render() {
+    ///     image.save_png("hello.png").unwrap();
+    /// }
+    /// ```
+    pub fn render(&mut self) -> Result<Screenshot, RendererError> {
+        let ppp = self.pixels_per_point;
+        if self.renderer.is_none() {
+            let renderer = pollster::block_on(OffscreenRenderer::new(self.fonts.atlas()))?;
+            self.renderer = Some(renderer);
+        }
+        let renderer = self.renderer.as_mut().expect("created above");
+        let size = PhysicalSize::new(
+            (self.screen_rect.width() * ppp).round() as u32,
+            (self.screen_rect.height() * ppp).round() as u32,
+        );
+        let meshes = Tessellator::new(ppp, self.fonts.atlas()).tessellate(&self.shapes);
+        let textures = TexturesDelta {
+            set: self.textures.clone(),
+            free: Vec::new(),
+        };
+        let job = PaintJob {
+            meshes: &meshes,
+            textures: &textures,
+            pixels_per_point: ppp,
+            clear_color: self.clear_color,
+        };
+        let pixels = renderer.render(size, &job, self.fonts.atlas_mut());
+        Ok(Screenshot {
+            size: [size.width, size.height],
+            pixels,
+        })
+    }
+
     /// The fonts (and glyph atlas), e.g. to render [`Harness::shapes`]
     /// offscreen.
     pub fn fonts(&mut self) -> &mut Fonts {
@@ -292,6 +399,45 @@ mod tests {
         assert!(app.on_close_requested());
         assert!(!h.click(&mut app, "Missing"));
         assert!(h.widgets().len() >= 3);
+    }
+
+    /// TST-04: textures loaded in earlier frames are still drawn.
+    #[test]
+    fn render_draws_the_last_frame_with_all_live_textures() {
+        let mut texture = None;
+        let mut app = |frame: &mut Frame| {
+            frame.clear_color = Color::from_srgb8(0, 0, 255);
+            let handle = texture.get_or_insert_with(|| {
+                let red = ColorImage::from_fn([4, 4], |_, _| Color::from_srgb8(255, 0, 0));
+                frame.ctx().load_texture(red)
+            });
+            let handle = handle.clone();
+            frame.ui(|ui| {
+                ui.add(rustroke_widgets::Image::new(&handle).size(vec2(40.0, 40.0)));
+            });
+        };
+        let mut h = Harness::with_size(100.0, 80.0).with_pixels_per_point(2.0);
+        h.run(&mut app);
+        h.run(&mut app);
+        let image = match h.render() {
+            Ok(image) => image,
+            Err(e) => {
+                eprintln!("skipping render test: {e:?}");
+                return;
+            }
+        };
+        assert_eq!(image.size, [200, 160]);
+        let image_rect = h.find("").map(|w| w.rect);
+        let center = image_rect.map_or(rustroke_core::point(36.0, 36.0), |r| r.center());
+        let [r, g, b, _] = image.pixel((center.x * 2.0) as u32, (center.y * 2.0) as u32);
+        assert!(
+            r > 200 && g < 30 && b < 30,
+            "the image, uploaded two frames ago"
+        );
+        assert_eq!(image.pixel(198, 158), [0, 0, 255, 255], "the clear color");
+        let path = std::env::temp_dir().join("rustroke_harness_render.png");
+        image.save_png(&path).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() > 100);
     }
 
     #[test]

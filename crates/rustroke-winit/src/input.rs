@@ -5,7 +5,9 @@ use rustroke_core::{
 };
 use rustroke_widgets::CursorIcon;
 use winit::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
+use winit::keyboard::{
+    Key as WinitKey, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey,
+};
 
 /// Accumulates events between frames.
 #[derive(Default)]
@@ -86,7 +88,15 @@ impl InputCollector {
 
     fn on_key(&mut self, event: &KeyEvent) {
         let pressed = event.state == ElementState::Pressed;
-        let key = key(&event.logical_key);
+        let key = if event.location == KeyLocation::Numpad {
+            numpad_key(event.physical_key)
+        } else {
+            // The character the key types, so shortcuts follow the
+            // keyboard layout (Cmd+Z is "Z" on AZERTY too). With Alt or
+            // Shift the character may change (Option+E types a dead key on
+            // macOS): fall back to the key's position.
+            key(&event.logical_key).or_else(|| physical_key(event.physical_key))
+        };
         // Clipboard shortcuts become dedicated events.
         if pressed && self.modifiers.command_only() {
             match key {
@@ -202,6 +212,15 @@ fn key(key: &WinitKey) -> Option<Key> {
                 "9" => Some(Key::Num9),
                 "-" => Some(Key::Minus),
                 "=" | "+" => Some(Key::Equals),
+                "," => Some(Key::Comma),
+                "." => Some(Key::Period),
+                "/" => Some(Key::Slash),
+                "\\" => Some(Key::Backslash),
+                ";" => Some(Key::Semicolon),
+                "'" => Some(Key::Quote),
+                "`" => Some(Key::Backquote),
+                "[" => Some(Key::OpenBracket),
+                "]" => Some(Key::CloseBracket),
                 _ => None,
             };
         }
@@ -234,6 +253,91 @@ fn key(key: &WinitKey) -> Option<Key> {
         NamedKey::End => Key::End,
         NamedKey::PageUp => Key::PageUp,
         NamedKey::PageDown => Key::PageDown,
+        NamedKey::Insert => Key::Insert,
+        _ => return None,
+    })
+}
+
+/// A key by its position on a US keyboard, when its character is unknown.
+fn physical_key(key: PhysicalKey) -> Option<Key> {
+    let PhysicalKey::Code(code) = key else {
+        return None;
+    };
+    Some(match code {
+        KeyCode::KeyA => Key::A,
+        KeyCode::KeyB => Key::B,
+        KeyCode::KeyC => Key::C,
+        KeyCode::KeyD => Key::D,
+        KeyCode::KeyE => Key::E,
+        KeyCode::KeyF => Key::F,
+        KeyCode::KeyG => Key::G,
+        KeyCode::KeyH => Key::H,
+        KeyCode::KeyI => Key::I,
+        KeyCode::KeyJ => Key::J,
+        KeyCode::KeyK => Key::K,
+        KeyCode::KeyL => Key::L,
+        KeyCode::KeyM => Key::M,
+        KeyCode::KeyN => Key::N,
+        KeyCode::KeyO => Key::O,
+        KeyCode::KeyP => Key::P,
+        KeyCode::KeyQ => Key::Q,
+        KeyCode::KeyR => Key::R,
+        KeyCode::KeyS => Key::S,
+        KeyCode::KeyT => Key::T,
+        KeyCode::KeyU => Key::U,
+        KeyCode::KeyV => Key::V,
+        KeyCode::KeyW => Key::W,
+        KeyCode::KeyX => Key::X,
+        KeyCode::KeyY => Key::Y,
+        KeyCode::KeyZ => Key::Z,
+        KeyCode::Digit0 => Key::Num0,
+        KeyCode::Digit1 => Key::Num1,
+        KeyCode::Digit2 => Key::Num2,
+        KeyCode::Digit3 => Key::Num3,
+        KeyCode::Digit4 => Key::Num4,
+        KeyCode::Digit5 => Key::Num5,
+        KeyCode::Digit6 => Key::Num6,
+        KeyCode::Digit7 => Key::Num7,
+        KeyCode::Digit8 => Key::Num8,
+        KeyCode::Digit9 => Key::Num9,
+        KeyCode::Minus => Key::Minus,
+        KeyCode::Equal => Key::Equals,
+        KeyCode::Comma => Key::Comma,
+        KeyCode::Period => Key::Period,
+        KeyCode::Slash => Key::Slash,
+        KeyCode::Backslash => Key::Backslash,
+        KeyCode::Semicolon => Key::Semicolon,
+        KeyCode::Quote => Key::Quote,
+        KeyCode::Backquote => Key::Backquote,
+        KeyCode::BracketLeft => Key::OpenBracket,
+        KeyCode::BracketRight => Key::CloseBracket,
+        _ => return None,
+    })
+}
+
+/// Keys of the numeric keypad.
+fn numpad_key(key: PhysicalKey) -> Option<Key> {
+    let PhysicalKey::Code(code) = key else {
+        return None;
+    };
+    Some(match code {
+        KeyCode::Numpad0 => Key::Numpad0,
+        KeyCode::Numpad1 => Key::Numpad1,
+        KeyCode::Numpad2 => Key::Numpad2,
+        KeyCode::Numpad3 => Key::Numpad3,
+        KeyCode::Numpad4 => Key::Numpad4,
+        KeyCode::Numpad5 => Key::Numpad5,
+        KeyCode::Numpad6 => Key::Numpad6,
+        KeyCode::Numpad7 => Key::Numpad7,
+        KeyCode::Numpad8 => Key::Numpad8,
+        KeyCode::Numpad9 => Key::Numpad9,
+        KeyCode::NumpadAdd => Key::NumpadAdd,
+        KeyCode::NumpadSubtract => Key::NumpadSubtract,
+        KeyCode::NumpadMultiply => Key::NumpadMultiply,
+        KeyCode::NumpadDivide => Key::NumpadDivide,
+        KeyCode::NumpadDecimal | KeyCode::NumpadComma => Key::NumpadDecimal,
+        // Activates buttons and submits fields like the main Enter key.
+        KeyCode::NumpadEnter => Key::Enter,
         _ => return None,
     })
 }
@@ -251,5 +355,35 @@ pub(crate) fn cursor_icon(icon: CursorIcon) -> winit::window::CursorIcon {
         CursorIcon::Crosshair => winit::window::CursorIcon::Crosshair,
         CursorIcon::Move => winit::window::CursorIcon::Move,
         CursorIcon::NotAllowed => winit::window::CursorIcon::NotAllowed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// INP-06
+    #[test]
+    fn keys_map_by_character_then_by_position() {
+        let ch = |c: &str| key(&WinitKey::Character(c.into()));
+        assert_eq!(ch("s"), Some(Key::S));
+        assert_eq!(ch("S"), Some(Key::S), "Shift doesn't change the key");
+        assert_eq!(ch(","), Some(Key::Comma));
+        assert_eq!(ch("\\"), Some(Key::Backslash));
+        assert_eq!(ch("´"), None, "Option+E on macOS: a dead key");
+        assert_eq!(physical_key(PhysicalKey::Code(KeyCode::KeyE)), Some(Key::E));
+        assert_eq!(
+            physical_key(PhysicalKey::Code(KeyCode::Digit3)),
+            Some(Key::Num3)
+        );
+        assert_eq!(
+            numpad_key(PhysicalKey::Code(KeyCode::Numpad7)),
+            Some(Key::Numpad7)
+        );
+        assert_eq!(
+            numpad_key(PhysicalKey::Code(KeyCode::NumpadEnter)),
+            Some(Key::Enter)
+        );
+        assert_eq!(key(&WinitKey::Named(NamedKey::Insert)), Some(Key::Insert));
     }
 }

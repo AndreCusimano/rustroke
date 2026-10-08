@@ -41,6 +41,8 @@ pub enum WidgetRole {
     Progress,
     /// The header of a collapsible section.
     CollapsingHeader,
+    /// A list of selectable rows.
+    List,
 }
 
 /// A widget as seen by a screen reader.
@@ -190,6 +192,7 @@ fn widget_node(w: &WidgetDescription) -> Node {
         WidgetRole::DragValue => Role::SpinButton,
         WidgetRole::Progress => Role::ProgressIndicator,
         WidgetRole::CollapsingHeader => Role::Button,
+        WidgetRole::List => Role::ListBox,
     };
     let mut node = Node::new(role);
     node.set_bounds(to_ak_rect(w.rect));

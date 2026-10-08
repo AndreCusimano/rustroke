@@ -16,4 +16,5 @@ workspace = true
 [dependencies]
 rustroke-core.workspace = true
 cosmic-text.workspace = true
+resvg.workspace = true
 log.workspace = true

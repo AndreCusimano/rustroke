@@ -644,12 +644,13 @@ impl Context {
         if self.input.consume_key(Key::Tab, Modifiers::SHIFT) {
             self.move_focus(false);
         }
-        // Escape closes the open popup; otherwise it leaves the focused
-        // widget, except text fields, which handle it themselves (cancel).
+        // Escape closes the open popup; otherwise it takes focus away from
+        // the focused widget, except text fields, which handle it
+        // themselves (cancel). When there is nothing to close, the app gets
+        // it (e.g. to leave a tool).
         let text_focused = self.focused.is_some() && self.focused == self.prev_frame.keyboard_owner;
-        if (self.open_popup.is_some() || !text_focused)
-            && self.input.consume_key(Key::Escape, Modifiers::NONE)
-        {
+        let escape_closes = self.open_popup.is_some() || (self.focused.is_some() && !text_focused);
+        if escape_closes && self.input.consume_key(Key::Escape, Modifiers::NONE) {
             if self.open_popup.is_some() {
                 self.open_popup = None;
             } else {
@@ -931,6 +932,17 @@ impl Context {
     }
 
     // ---- Popups ----
+
+    /// A popup (menu, combo box list, context menu) is open: keys like
+    /// Escape, arrows and Enter belong to it, not to app shortcuts.
+    pub fn any_popup_open(&self) -> bool {
+        self.open_popup.is_some()
+    }
+
+    /// The widget whose popup is open, if any.
+    pub fn open_popup_id(&self) -> Option<Id> {
+        self.open_popup
+    }
 
     /// True if the popup of widget `id` is open.
     pub fn is_popup_open(&self, id: Id) -> bool {

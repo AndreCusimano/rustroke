@@ -6,6 +6,62 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-09
+
+### Added
+
+- **SVG icons**: `Fonts::add_svg_icon(svg)` (through `Frame::fonts()`)
+  loads an icon that is rasterized on demand at the size and screen density
+  it is drawn at, cached in the glyph atlas. Two-tone: black parts take the
+  text color and `#1E6FFF` parts (`ICON_ACCENT_SOURCE_COLOR`) the theme's
+  accent, so one file fits light and dark themes and every widget state.
+  `add_svg_icon_themed(light, dark)` for icons that need a dark drawing,
+  `add_svg_icon_colored` for icons with their own colors. Shown with
+  `Icon` / `Ui::icon`, `Button::icon`, `Button::icon_only`,
+  `CollapsingHeader::icon`; `Ui::rasterize_icon` and `Ui::paint_icon` for
+  custom widgets. SVGs are rendered with resvg (Apache-2.0 OR MIT).
+- **Lists**: `List::new(id).multi_select(..).reorderable(..).show(ui,
+  &mut items, &mut selection, |ui, index, item| ..)`: rows that can be
+  selected (click, Cmd/Ctrl+click, Shift+click, arrow keys, Home/End) and
+  reordered by dragging, with a `ListResponse` (row responses for context
+  menus and tooltips, clicked row, selection changes, moves).
+- **Scrolling sideways**: `ScrollArea::horizontal()` and `both()`, with
+  `max_width`; the mouse wheel scrolls sideways in horizontal-only areas
+  and with Shift.
+- `Panel::auto_width()`: a side panel exactly as wide as its content.
+- **Undo and redo in text fields**: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z (and
+  Ctrl+Y outside macOS); typing within a second is undone in one step.
+- **Bundled symbol font** (subset of Noto Sans Math, Symbols and Symbols 2,
+  SIL Open Font License): arrows, math and technical symbols, shapes and
+  dingbats (↶ ⚓ ∥ ⊥ ⌀ ✓ ★ ⚙) render even without system fonts.
+- **More keys**: `,` `.` `/` `\` `;` `'` `` ` `` `[` `]`, the numeric
+  keypad (`Numpad0`–`Numpad9`, operators, decimal point; its Enter is
+  `Key::Enter`) and Insert. Letters and digits are recognized with
+  Cmd/Ctrl/Alt held too (by position when the typed character is unknown,
+  e.g. Option+E on macOS).
+- `testing::Harness::render()` draws the last frame on the GPU without a
+  window (with every texture still alive) and returns a `Screenshot`
+  (`pixel`, `save_png`).
+- `Button::selected(..)` highlights the current choice (active tool).
+- `Context::any_popup_open()` and `Context::open_popup_id()`, to leave
+  Escape, arrows and Enter to an open menu.
+- `Ui::fill_width(natural)` for widgets that fill the available width.
+- New examples: `lists` (icons, reorderable list, horizontal scrolling) and
+  `files` (open and save with native dialogs through `rfd`).
+
+### Fixed
+
+- `DragValue`: dragging over several frames now adds up the whole
+  movement (it only counted the last frame's movement).
+
+### Changed
+
+- Inside a horizontally scrolling area the available width is unlimited:
+  labels don't wrap and widgets that fill the width use their natural size.
+- Scroll bars only take space when the content overflows.
+- Escape is only consumed when it closes a popup or takes focus away from a
+  widget; otherwise the app sees it (e.g. to leave a tool).
+
 ## [0.3.0] — 2026-10-08
 
 ### Added
@@ -130,7 +186,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/AndreCusimano/rustroke/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AndreCusimano/rustroke/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AndreCusimano/rustroke/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/AndreCusimano/rustroke/compare/v0.1.0...v0.1.1

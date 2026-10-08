@@ -45,12 +45,124 @@ impl TextEditState {
     }
 }
 
+/// Most undo steps kept per field.
+const UNDO_LIMIT: usize = 100;
+
+/// Typing or deleting within this many seconds of the previous edit is
+/// undone together.
+const UNDO_GROUP_SECONDS: f64 = 1.0;
+
+/// Text and selection at one point of the edit history.
+#[derive(Clone, Debug)]
+struct Snapshot {
+    text: String,
+    cursor: usize,
+    anchor: usize,
+}
+
+impl Snapshot {
+    fn of(text: &str, state: &TextEditState) -> Self {
+        Self {
+            text: text.to_owned(),
+            cursor: state.cursor,
+            anchor: state.anchor,
+        }
+    }
+}
+
+/// Kinds of edits; consecutive typing (or deleting) is undone as one step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditKind {
+    Typing,
+    Deleting,
+    Other,
+}
+
+/// Undo and redo history of a field, for one editing session (cleared
+/// when the field gets focus). Kept apart from [`TextEditState`] and only
+/// loaded while editing, since it holds copies of the text.
+#[derive(Clone, Debug, Default)]
+struct UndoHistory {
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    last: Option<(EditKind, f64)>,
+}
+
+impl UndoHistory {
+    /// Records the state `before` an edit of `kind` made at `now`.
+    fn record(&mut self, before: Snapshot, kind: EditKind, now: f64) {
+        let grouped = kind != EditKind::Other
+            && self
+                .last
+                .is_some_and(|(k, t)| k == kind && now - t < UNDO_GROUP_SECONDS);
+        if !grouped {
+            self.undo.push(before);
+            if self.undo.len() > UNDO_LIMIT {
+                self.undo.remove(0);
+            }
+        }
+        self.redo.clear();
+        self.last = Some((kind, now));
+    }
+
+    /// Undoes (or redoes) one step. Returns whether the text changed.
+    fn step(&mut self, text: &mut String, state: &mut TextEditState, redo: bool) -> bool {
+        let (from, to) = if redo {
+            (&mut self.redo, &mut self.undo)
+        } else {
+            (&mut self.undo, &mut self.redo)
+        };
+        let Some(snapshot) = from.pop() else {
+            return false;
+        };
+        to.push(Snapshot::of(text, state));
+        *text = snapshot.text;
+        state.cursor = clamp_to_boundary(text, snapshot.cursor);
+        state.anchor = clamp_to_boundary(text, snapshot.anchor);
+        state.preferred_x = None;
+        self.last = None;
+        true
+    }
+}
+
+/// `Some(false)` for the undo shortcut (Cmd/Ctrl+Z), `Some(true)` for
+/// redo (Cmd/Ctrl+Shift+Z, or Ctrl+Y outside macOS).
+fn undo_shortcut(key: Key, modifiers: Modifiers) -> Option<bool> {
+    let shift_command = modifiers == Modifiers::COMMAND.plus(Modifiers::SHIFT);
+    match key {
+        Key::Z if modifiers.command_only() => Some(false),
+        Key::Z if shift_command => Some(true),
+        Key::Y if !cfg!(target_os = "macos") && modifiers.command_only() => Some(true),
+        _ => None,
+    }
+}
+
+/// What kind of edit `event` would make, if any.
+fn edit_kind(event: &Event, multiline: bool) -> Option<EditKind> {
+    match event {
+        Event::Text(_) | Event::Ime(ImeEvent::Commit(_)) => Some(EditKind::Typing),
+        Event::Paste(_) | Event::Cut => Some(EditKind::Other),
+        Event::Key {
+            key: Key::Backspace | Key::Delete,
+            pressed: true,
+            ..
+        } => Some(EditKind::Deleting),
+        Event::Key {
+            key: Key::Enter,
+            pressed: true,
+            ..
+        } if multiline => Some(EditKind::Other),
+        _ => None,
+    }
+}
+
 /// A field to edit a `String`: single-line (e.g. a name) or multi-line
 /// (wraps and grows with its content).
 ///
 /// Mouse: click to place the cursor, drag or Shift+click to select.
 /// Keyboard: arrows, Home/End, Alt/Ctrl+arrows by word, Shift to select,
-/// Backspace/Delete, Cmd/Ctrl+A/C/X/V. Enter in a single-line field ends
+/// Backspace/Delete, Cmd/Ctrl+A/C/X/V, Cmd/Ctrl+Z to undo and
+/// Cmd/Ctrl+Shift+Z (or Ctrl+Y) to redo. Enter in a single-line field ends
 /// editing ([`FocusLost::Submit`]); Escape restores the text the field had
 /// when it got focus and ends editing ([`FocusLost::Cancel`]). See
 /// [`Response::lost_focus_reason`].
@@ -139,7 +251,11 @@ impl Widget for TextEdit<'_> {
         let available = ui.available_width();
         let width = self
             .desired_width
-            .unwrap_or(if self.multiline { available } else { 240.0 })
+            .unwrap_or(if self.multiline {
+                ui.fill_width(480.0)
+            } else {
+                240.0
+            })
             .min(available)
             .max(40.0);
         let inner_width = width - 2.0 * padding.x;
@@ -197,8 +313,10 @@ impl Widget for TextEdit<'_> {
             // Focus moved away (Tab, click elsewhere): keep the edits.
             response.lost_focus = Some(FocusLost::Other);
         }
+        let undo_id = id.with("undo");
         if gained_focus {
             state.original = Some(self.text.clone());
+            ui.ctx().remove_data(undo_id);
         }
 
         // Mouse: place the cursor and select by dragging.
@@ -222,7 +340,28 @@ impl Widget for TextEdit<'_> {
             ui.ctx().set_keyboard_owner(id);
             let events = ui.input().events.clone();
             let mut galley = std::sync::Arc::clone(&galley);
+            let mut history: Option<UndoHistory> = None;
             for event in events {
+                if let Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                    && let Some(redo) = undo_shortcut(key, modifiers)
+                {
+                    // The app's own undo must not run too.
+                    ui.ctx().input_mut().consume_key(key, modifiers);
+                    let history =
+                        history.get_or_insert_with(|| ui.ctx().data(undo_id).unwrap_or_default());
+                    if history.step(self.text, &mut state, redo) {
+                        changed = true;
+                        galley = ui.layout_text(self.text, &style.body, wrap);
+                    }
+                    continue;
+                }
+                let kind = edit_kind(&event, self.multiline);
+                let before = kind.map(|_| Snapshot::of(self.text, &state));
                 let edited = match event {
                     Event::Text(text) => insert(self.text, &mut state, &text, self.multiline),
                     Event::Paste(text) => insert(self.text, &mut state, &text, self.multiline),
@@ -283,11 +422,22 @@ impl Widget for TextEdit<'_> {
                     },
                     _ => false,
                 };
+                if let (Some(kind), Some(before)) = (kind, before)
+                    && before.text != *self.text
+                    && response.lost_focus.is_none()
+                {
+                    let history =
+                        history.get_or_insert_with(|| ui.ctx().data(undo_id).unwrap_or_default());
+                    history.record(before, kind, now);
+                }
                 if edited {
                     changed = true;
                     // Later keys (e.g. arrows after typing) need the new layout.
                     galley = ui.layout_text(self.text, &style.body, wrap);
                 }
+            }
+            if let Some(history) = history {
+                ui.ctx().insert_data(undo_id, history);
             }
         }
         if changed || state.cursor != old_cursor {

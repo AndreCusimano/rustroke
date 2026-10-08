@@ -16,6 +16,8 @@ const DRAG_THRESHOLD: f32 = 3.0;
 #[derive(Clone, Copy, Debug)]
 struct DragState {
     start_value: f64,
+    /// Horizontal pointer movement since the press.
+    total: f32,
     moved: bool,
 }
 
@@ -187,6 +189,7 @@ impl<T: Numeric> Widget for DragValue<'_, T> {
                 drag_key,
                 DragState {
                     start_value: old,
+                    total: 0.0,
                     moved: false,
                 },
             );
@@ -194,12 +197,13 @@ impl<T: Numeric> Widget for DragValue<'_, T> {
         if response.dragged()
             && let Some(mut drag) = ui.ctx().data::<DragState>(drag_key)
         {
-            let delta = response.drag_delta().x;
-            if delta.abs() >= DRAG_THRESHOLD {
+            // `drag_delta` is this frame's movement: add it up.
+            drag.total += response.drag_delta().x;
+            if drag.total.abs() >= DRAG_THRESHOLD {
                 drag.moved = true;
             }
             if drag.moved {
-                value = drag.start_value + f64::from(delta) * self.speed;
+                value = drag.start_value + f64::from(drag.total) * self.speed;
             }
             ui.ctx().insert_data(drag_key, drag);
         }

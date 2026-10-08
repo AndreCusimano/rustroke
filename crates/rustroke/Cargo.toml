@@ -29,3 +29,5 @@ image = ["dep:image"]
 [dev-dependencies]
 env_logger.workspace = true
 log.workspace = true
+# Native file dialogs, only for the `files` example.
+rfd = "0.17"

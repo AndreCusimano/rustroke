@@ -1758,6 +1758,8 @@ fn drag_value_respects_range_and_integers() {
     assert_eq!(n, 7, "5 + 6 × 0.25 = 6.5, rounded");
     run(&mut h, &mut n, vec![move_to(p + vec2(100.0, 0.0))]);
     assert_eq!(n, 8, "clamped");
+    run(&mut h, &mut n, vec![move_to(p - vec2(2.0, 0.0))]);
+    assert_eq!(n, 5, "the whole drag counts, not the last frame's movement");
 }
 
 /// WID-06
@@ -1944,4 +1946,345 @@ fn menu_items_show_shortcut_text() {
     });
     let without = h.ctx.find_widget("Save").unwrap().rect.width();
     assert!(with > without + 20.0, "room for the shortcut");
+}
+
+// ---- v0.4 ----
+
+/// LAY-06: a horizontal scroll area keeps wide content on one line and
+/// scrolls it sideways with the wheel (vertical wheel, no Shift needed).
+#[test]
+fn horizontal_scroll_area_scrolls_wide_content() {
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, events| {
+        let mut label = None;
+        let mut area = None;
+        h.frame(events, |ui| {
+            let r = crate::ScrollArea::horizontal().show(ui, |ui| {
+                label = Some(ui.label("A very long line of text that would wrap in a 400 point window if it could, but here it does not").rect);
+                ui.separator();
+            });
+            area = Some(r.response.rect);
+        });
+        (label.unwrap(), area.unwrap())
+    };
+    run(&mut h, vec![]);
+    let (label, area) = run(&mut h, vec![]);
+    assert!(label.width() > area.width(), "no wrapping");
+    assert!(label.height() < 30.0, "one line");
+    assert!(area.height() < 80.0, "as tall as the content plus the bar");
+    let p = area.center();
+    run(&mut h, vec![move_to(p), Event::Scroll(vec2(0.0, -50.0))]);
+    // The new offset shows from the next frame.
+    let (moved, _) = run(&mut h, vec![]);
+    assert_eq!(moved.min.x, label.min.x - 50.0);
+}
+
+#[test]
+fn scroll_area_both_directions() {
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, events| {
+        let mut first = None;
+        h.frame(events, |ui| {
+            crate::ScrollArea::both()
+                .max_height(100.0)
+                .max_width(150.0)
+                .show(ui, |ui| {
+                    for i in 0..20 {
+                        let r =
+                            ui.label(format!("Row {i} with some extra width to scroll sideways"));
+                        if i == 0 {
+                            first = Some(r.rect);
+                        }
+                    }
+                });
+        });
+        first.unwrap()
+    };
+    run(&mut h, vec![]);
+    let start = run(&mut h, vec![]);
+    let p = start.min + vec2(20.0, 20.0);
+    run(&mut h, vec![move_to(p), Event::Scroll(vec2(-30.0, -40.0))]);
+    let moved = run(&mut h, vec![]);
+    assert_eq!(moved.min, start.min - vec2(30.0, 40.0));
+}
+
+/// LAY-02
+#[test]
+fn auto_width_panel_fits_its_content() {
+    let mut h = Harness::new();
+    let mut width = 0.0;
+    for _ in 0..3 {
+        h.frame_with(vec![], |h| {
+            width = crate::Panel::left("auto")
+                .auto_width()
+                .show(h, |ui| {
+                    ui.label("Short");
+                    ui.add(crate::Button::new("A wider button here"));
+                })
+                .response
+                .rect
+                .width();
+        });
+    }
+    let button = h.ctx.find_widget("A wider button here").unwrap().rect;
+    let pad = h.ctx.style().spacing.window_padding;
+    assert_eq!(width, (button.width() + 2.0 * pad).round());
+}
+
+/// TXT-03: undo and redo while typing; typing within a second is one step.
+#[test]
+fn text_edit_undo_and_redo() {
+    let mut h = Harness::new();
+    let mut s = String::from("ab");
+    focused_field(&mut h, &mut s, false);
+    edit_frame(&mut h, &mut s, false, vec![text("c")]);
+    edit_frame(&mut h, &mut s, false, vec![text("d")]);
+    h.time += 2.0;
+    edit_frame(&mut h, &mut s, false, vec![press_key(Key::Backspace)]);
+    assert_eq!(s, "abc");
+    let shift_command = Modifiers::COMMAND.plus(Modifiers::SHIFT);
+    edit_frame(&mut h, &mut s, false, vec![command(Key::Z)]);
+    assert_eq!(s, "abcd", "undo the deletion");
+    assert!(
+        !h.ctx.input().key_pressed(Key::Z),
+        "the field took the shortcut"
+    );
+    edit_frame(&mut h, &mut s, false, vec![command(Key::Z)]);
+    assert_eq!(s, "ab", "typing \"cd\" is one step");
+    edit_frame(&mut h, &mut s, false, vec![command(Key::Z)]);
+    assert_eq!(s, "ab", "nothing more to undo");
+    edit_frame(&mut h, &mut s, false, vec![key(Key::Z, shift_command)]);
+    assert_eq!(s, "abcd");
+    edit_frame(&mut h, &mut s, false, vec![text("!")]);
+    edit_frame(&mut h, &mut s, false, vec![key(Key::Z, shift_command)]);
+    assert_eq!(s, "abcd!", "a new edit clears redo");
+}
+
+fn list_frame(
+    h: &mut Harness,
+    items: &mut Vec<&'static str>,
+    selection: &mut Vec<usize>,
+    events: Vec<Event>,
+) -> crate::ListResponse {
+    let mut out = None;
+    h.frame(events, |ui| {
+        out = Some(
+            crate::List::new("list")
+                .multi_select(true)
+                .reorderable(true)
+                .show(ui, items, selection, |ui, _, item| {
+                    ui.label(*item);
+                }),
+        );
+    });
+    out.unwrap()
+}
+
+fn click_with_modifiers(pos: Point, modifiers: Modifiers) -> Vec<Event> {
+    let b = |pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers,
+    };
+    vec![move_to(pos), b(true), b(false)]
+}
+
+/// WID-03: selection by click, Cmd/Ctrl+click, Shift+click and arrows.
+#[test]
+fn list_selects_rows() {
+    let mut h = Harness::new();
+    let mut items = vec!["a", "b", "c", "d"];
+    let mut sel = Vec::new();
+    list_frame(&mut h, &mut items, &mut sel, vec![]);
+    let rows: Vec<Rect> = list_frame(&mut h, &mut items, &mut sel, vec![])
+        .rows
+        .iter()
+        .map(|r| r.rect)
+        .collect();
+    assert!(rows[1].min.y >= rows[0].max.y, "rows don't overlap");
+
+    let r = list_frame(&mut h, &mut items, &mut sel, click_at(rows[1].center()));
+    assert_eq!(r.clicked, Some(1));
+    assert!(r.selection_changed);
+    assert_eq!(sel, [1]);
+
+    list_frame(
+        &mut h,
+        &mut items,
+        &mut sel,
+        click_with_modifiers(rows[3].center(), Modifiers::COMMAND),
+    );
+    sel.sort_unstable();
+    assert_eq!(sel, [1, 3], "Cmd/Ctrl+click adds");
+
+    list_frame(
+        &mut h,
+        &mut items,
+        &mut sel,
+        click_with_modifiers(rows[0].center(), Modifiers::SHIFT),
+    );
+    sel.sort_unstable();
+    assert_eq!(
+        sel,
+        [0, 1, 2, 3],
+        "Shift+click: range from the anchor (row 3)"
+    );
+
+    list_frame(&mut h, &mut items, &mut sel, click_at(rows[2].center()));
+    assert_eq!(sel, [2]);
+    list_frame(
+        &mut h,
+        &mut items,
+        &mut sel,
+        vec![press_key(Key::ArrowDown)],
+    );
+    assert_eq!(sel, [3], "the clicked list has focus: arrows move");
+    list_frame(&mut h, &mut items, &mut sel, vec![press_key(Key::Home)]);
+    assert_eq!(sel, [0]);
+    assert!(
+        h.ctx
+            .widgets()
+            .iter()
+            .any(|w| w.info.role == crate::WidgetRole::List)
+    );
+}
+
+/// WID-03: dragging a row over several frames moves the item.
+#[test]
+fn list_reorders_by_dragging() {
+    let mut h = Harness::new();
+    let mut items = vec!["a", "b", "c", "d"];
+    let mut sel = vec![0];
+    list_frame(&mut h, &mut items, &mut sel, vec![]);
+    let rows: Vec<Rect> = list_frame(&mut h, &mut items, &mut sel, vec![])
+        .rows
+        .iter()
+        .map(|r| r.rect)
+        .collect();
+    let start = rows[0].center();
+    list_frame(
+        &mut h,
+        &mut items,
+        &mut sel,
+        vec![move_to(start), button(start, true)],
+    );
+    // Move in small steps: the whole drag counts.
+    let mut y = start.y;
+    let target = rows[2].max.y - 2.0;
+    while y < target {
+        y = (y + 6.0).min(target);
+        list_frame(
+            &mut h,
+            &mut items,
+            &mut sel,
+            vec![move_to(point(start.x, y))],
+        );
+    }
+    assert_eq!(items, ["a", "b", "c", "d"], "nothing moves before the drop");
+    let r = list_frame(
+        &mut h,
+        &mut items,
+        &mut sel,
+        vec![button(point(start.x, y), false)],
+    );
+    assert_eq!(r.moved, Some((0, 2)));
+    assert_eq!(items, ["b", "c", "a", "d"]);
+    assert_eq!(sel, [2], "the selection follows the item");
+}
+
+#[test]
+fn horizontal_scroll_area_in_a_bottom_panel() {
+    let mut h = Harness::new();
+    let mut last = Vec::new();
+    for _ in 0..4 {
+        last.clear();
+        h.frame_with(vec![], |h| {
+            crate::Panel::bottom("timeline").show(h, |ui| {
+                crate::ScrollArea::horizontal().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for i in 0..40 {
+                            last.push(ui.button(format!("{i}")).rect);
+                        }
+                    });
+                });
+            });
+        });
+    }
+    assert!(
+        last[0].min.y >= 200.0 && last[0].max.y <= 300.0,
+        "inside the window: {:?}",
+        last[0]
+    );
+    assert_eq!(last[0].min.y, last[39].min.y, "one row");
+}
+
+const TEST_ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <rect x="2" y="2" width="12" height="12" fill="#000"/>
+    <circle cx="8" cy="8" r="3" fill="#1E6FFF"/></svg>"##;
+
+/// WID-07 / ICO-04: icons in buttons, alone or before text.
+#[test]
+fn buttons_with_icons() {
+    let mut h = Harness::new();
+    let icon = h.fonts.add_svg_icon(TEST_ICON).unwrap();
+    let mut rects = Vec::new();
+    for _ in 0..2 {
+        rects.clear();
+        h.frame(vec![], |ui| {
+            rects.push(
+                ui.add(crate::Button::icon_only(icon).accessible_label("Extrude"))
+                    .rect,
+            );
+            rects.push(ui.add(crate::Button::new("Extrude").icon(icon)).rect);
+            rects.push(ui.button("Extrude").rect);
+            rects.push(ui.icon(icon).rect);
+        });
+    }
+    assert!(h.ctx.find_widget("Extrude").is_some());
+    assert!(rects[0].width() < rects[2].width(), "icon only is narrow");
+    assert!(
+        (rects[1].width() - rects[2].width() - (16.0 + 6.0)).abs() < 0.5,
+        "icon + gap before the text"
+    );
+    assert_eq!(rects[3].size(), vec2(16.0, 16.0));
+    // Two layers per icon: line and accent, drawn as text.
+    let texts = h
+        .shapes
+        .shapes()
+        .iter()
+        .filter(|s| matches!(s.shape, rustroke_core::Shape::Text { .. }))
+        .count();
+    assert!(texts >= 2 * 3 + 2, "{texts}");
+}
+
+/// INP-07 / INP-08: Escape reaches the app when it closes nothing.
+#[test]
+fn escape_is_left_to_the_app_when_nothing_closes() {
+    let mut h = Harness::new();
+    let mut seen = false;
+    h.frame(vec![press_key(Key::Escape)], |ui| {
+        ui.button("Button");
+        seen = ui.input().key_pressed(Key::Escape);
+    });
+    assert!(seen, "no popup, no focus: the app sees Escape");
+
+    // With a popup open, Escape closes it and is consumed.
+    let menu = |h: &mut Harness, events| {
+        let mut seen = false;
+        let mut open = false;
+        let mut rect = Rect::NOTHING;
+        h.frame(events, |ui| {
+            rect = ui.menu_button("File", |ui| ui.button("New")).response.rect;
+            seen = ui.input().key_pressed(Key::Escape);
+            open = ui.ctx().any_popup_open();
+        });
+        (seen, open, rect)
+    };
+    let (.., rect) = menu(&mut h, vec![]);
+    let (_, open, _) = menu(&mut h, click_at(rect.center()));
+    assert!(open);
+    assert!(h.ctx.open_popup_id().is_some());
+    let (seen, open, _) = menu(&mut h, vec![press_key(Key::Escape)]);
+    assert!(!open && !seen, "closing the menu took the key");
 }

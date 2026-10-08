@@ -83,16 +83,22 @@ fn main() -> Result<(), rustroke::RunError> {
 
 - **Widgets**: labels, buttons, checkboxes, radio buttons, selectable labels,
   sliders, drag values (drag or type a number), combo boxes, progress bars,
-  spinners, single and multi-line text fields (selection, clipboard, word
-  navigation, input methods for accented and Asian text), images, separators.
-  Any widget can be disabled.
+  spinners, lists that can be selected and reordered by dragging, single and
+  multi-line text fields (selection, clipboard, undo, word navigation, input
+  methods for accented and Asian text), images, SVG icons, separators. Any
+  widget can be disabled.
 - **Layout**: rows, columns, alignment, wrapping, fixed-size widgets, grids
   with aligned columns.
-- **Containers**: top/bottom/side panels (resizable), movable and resizable
-  windows, scroll areas, popup and context menus, collapsible sections and
+- **Containers**: top/bottom/side panels (resizable or as wide as their
+  content), movable and resizable windows, scroll areas (vertical,
+  horizontal, both), popup and context menus, collapsible sections and
   trees, tooltips.
 - **Text**: shaping, bidirectional text and wrapping via cosmic-text. The Inter
-  font is bundled; system fonts are used for emoji and other scripts.
+  font and a symbol font (arrows, math, technical symbols) are bundled; system
+  fonts are used for emoji and other scripts.
+- **Icons**: SVG icons rasterized at any size and screen density, recolored
+  from the theme (line and accent colors), so one icon set fits light and
+  dark themes.
 - **Drawing**: anti-aliased rectangles (rounded), circles, lines, polygons,
   text and images, pixel-aligned on HiDPI screens.
 - **Style**: dark and light themes, accent colors, animated transitions,
@@ -104,7 +110,8 @@ fn main() -> Result<(), rustroke::RunError> {
 - **Your own GPU rendering**: render a 3D viewport (or anything) with wgpu
   into your own texture and show it in the UI without copies.
 - **Testing**: run your app without a window, click widgets by label, type
-  text and check the result (`rustroke::testing::Harness`).
+  text, check the result and render the frame to a PNG
+  (`rustroke::testing::Harness`).
 
 Desktop: macOS, Windows, Linux. Minimum Rust version: 1.89.
 
@@ -123,6 +130,8 @@ Desktop: macOS, Windows, Linux. Minimum Rust version: 1.89.
 ```sh
 cargo run -p rustroke --example widgets     # buttons, checkboxes, radios, sliders, keyboard focus
 cargo run -p rustroke --example properties  # tree, property panel, combo boxes, drag values, shortcuts
+cargo run -p rustroke --example lists       # SVG icons, reorderable list, horizontal scrolling
+cargo run -p rustroke --example files       # open and save files with native dialogs (rfd)
 cargo run -p rustroke --example layout      # rows, alignment, wrapping, grids
 cargo run -p rustroke --example containers  # menus, panels, windows, scroll areas, tooltips
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
@@ -167,12 +176,14 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 - **Fonts and colors.** The bundled [Inter](https://github.com/rsms/inter) font
   is under the SIL Open Font License 1.1 (included in
   `crates/rustroke-text/fonts/`), which allows embedding in commercial
-  software. The default themes use colors from the
+  software. The bundled symbol font is a subset of Noto Sans Math, Noto Sans
+  Symbols and Noto Sans Symbols 2 (SIL Open Font License 1.1, also in
+  `crates/rustroke-text/fonts/`). The default themes use colors from the
   [Catppuccin](https://github.com/catppuccin/catppuccin) palette (MIT).
 
 ## Status
 
-Version 0.3: the core is complete and tested (interaction tests without a
+Version 0.4: the core is complete and tested (interaction tests without a
 window, GPU snapshot tests, CI on macOS, Windows and Linux). Known limitations
 are listed in the [changelog](CHANGELOG.md). Coming next: extending and
 customizing shapes, and a visual screen designer built with Rustroke itself.

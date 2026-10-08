@@ -36,7 +36,7 @@ impl PointerButton {
 pub enum Key {
     /// Tab: moves keyboard focus.
     Tab,
-    /// Enter / Return.
+    /// Enter / Return (also the Enter key of the numeric keypad).
     Enter,
     /// The space bar.
     Space,
@@ -164,6 +164,56 @@ pub enum Key {
     Minus,
     /// The `=` / `+` key.
     Equals,
+    /// The `,` key.
+    Comma,
+    /// The `.` key.
+    Period,
+    /// The `/` key.
+    Slash,
+    /// The `\` key.
+    Backslash,
+    /// The `;` key.
+    Semicolon,
+    /// The `'` key.
+    Quote,
+    /// The `` ` `` key.
+    Backquote,
+    /// The `[` key.
+    OpenBracket,
+    /// The `]` key.
+    CloseBracket,
+    /// The 0 key of the numeric keypad.
+    Numpad0,
+    /// The 1 key of the numeric keypad.
+    Numpad1,
+    /// The 2 key of the numeric keypad.
+    Numpad2,
+    /// The 3 key of the numeric keypad.
+    Numpad3,
+    /// The 4 key of the numeric keypad.
+    Numpad4,
+    /// The 5 key of the numeric keypad.
+    Numpad5,
+    /// The 6 key of the numeric keypad.
+    Numpad6,
+    /// The 7 key of the numeric keypad.
+    Numpad7,
+    /// The 8 key of the numeric keypad.
+    Numpad8,
+    /// The 9 key of the numeric keypad.
+    Numpad9,
+    /// The `+` key of the numeric keypad.
+    NumpadAdd,
+    /// The `-` key of the numeric keypad.
+    NumpadSubtract,
+    /// The `*` key of the numeric keypad.
+    NumpadMultiply,
+    /// The `/` key of the numeric keypad.
+    NumpadDivide,
+    /// The decimal point key of the numeric keypad.
+    NumpadDecimal,
+    /// Insert.
+    Insert,
 }
 
 impl Key {
@@ -198,6 +248,31 @@ impl Key {
             Self::PageDown => "PgDn",
             Self::Minus => "-",
             Self::Equals => "=",
+            Self::Comma => ",",
+            Self::Period => ".",
+            Self::Slash => "/",
+            Self::Backslash => "\\",
+            Self::Semicolon => ";",
+            Self::Quote => "'",
+            Self::Backquote => "`",
+            Self::OpenBracket => "[",
+            Self::CloseBracket => "]",
+            Self::Numpad0 => "Num 0",
+            Self::Numpad1 => "Num 1",
+            Self::Numpad2 => "Num 2",
+            Self::Numpad3 => "Num 3",
+            Self::Numpad4 => "Num 4",
+            Self::Numpad5 => "Num 5",
+            Self::Numpad6 => "Num 6",
+            Self::Numpad7 => "Num 7",
+            Self::Numpad8 => "Num 8",
+            Self::Numpad9 => "Num 9",
+            Self::NumpadAdd => "Num +",
+            Self::NumpadSubtract => "Num -",
+            Self::NumpadMultiply => "Num *",
+            Self::NumpadDivide => "Num /",
+            Self::NumpadDecimal => "Num .",
+            Self::Insert => "Insert",
             Self::A => "A",
             Self::B => "B",
             Self::C => "C",

@@ -23,6 +23,7 @@ mod drag_value;
 mod grid;
 mod id;
 mod layout;
+mod list;
 mod popup;
 mod response;
 mod style;
@@ -41,13 +42,14 @@ pub use drag_value::DragValue;
 pub use grid::Grid;
 pub use id::Id;
 pub use layout::{Align, Direction, Layout};
+pub use list::{List, ListResponse};
 pub use response::{FocusLost, Response};
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
 pub use text_edit::TextEdit;
 pub use ui::{InnerResponse, Ui};
 pub use widgets::{
-    Button, Checkbox, Image, Label, Numeric, ProgressBar, RadioButton, SelectableLabel, Separator,
-    Slider, Spinner, Widget,
+    Button, Checkbox, Icon, Image, Label, Numeric, ProgressBar, RadioButton, SelectableLabel,
+    Separator, Slider, Spinner, Widget,
 };
 
 #[cfg(test)]

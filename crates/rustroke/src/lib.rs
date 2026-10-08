@@ -61,7 +61,8 @@
 //! - **Widgets**: [`Ui::label`], [`Ui::button`], [`Ui::checkbox`],
 //!   [`Ui::radio_value`], [`Ui::selectable_value`], [`Slider`],
 //!   [`DragValue`] (drag or type a number), [`ComboBox`] (drop-down list),
-//!   [`TextEdit`], [`Image`], [`ProgressBar`], [`Spinner`],
+//!   [`TextEdit`], [`Image`], [`Icon`], [`ProgressBar`], [`Spinner`],
+//!   [`List`] (rows to select and reorder by dragging),
 //!   [`Ui::separator`]; any widget can be disabled with
 //!   [`Ui::add_enabled`]. Implement [`Widget`] for your own.
 //! - **Layout**: a [`Ui`] stacks widgets top to bottom. Use
@@ -69,7 +70,7 @@
 //!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables.
 //! - **Containers**: [`Panel`] (top/bottom/left/right bars), the central
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
-//!   [`ScrollArea`], popup menus ([`Ui::menu_button`]), context menus
+//!   [`ScrollArea`] (vertical, horizontal or both), popup menus ([`Ui::menu_button`]), context menus
 //!   ([`Response::context_menu`]), collapsible sections and trees
 //!   ([`CollapsingHeader`]) and tooltips ([`Response::on_hover_text`]).
 //!   Show panels before the central area.
@@ -81,13 +82,19 @@
 //!   [`Context::wants_keyboard_input`] (the user is typing).
 //! - **Text**: all text uses the bundled Inter font, with system fonts as
 //!   fallback for other scripts and emoji. Fields support selection,
-//!   clipboard and input methods (IME); Escape cancels an edit and
+//!   clipboard, undo/redo and input methods (IME); Escape cancels an edit and
 //!   [`Response::lost_focus_reason`] tells why editing ended.
 //! - **Style**: [`Style::dark`] / [`Style::light`], changed at runtime with
 //!   [`Context::set_style`] or locally with [`Ui::style_mut`]. Hover and
 //!   press colors animate.
 //! - **Images**: decode with [`load_image`] (PNG, JPEG), upload once with
 //!   [`Context::load_texture`], show with [`Image`].
+//! - **Icons**: load SVGs once with [`Fonts::add_svg_icon`] (through
+//!   [`Frame::fonts`]); they are rasterized at the size and screen density
+//!   they are drawn at. Black parts take the text color and
+//!   [`ICON_ACCENT_SOURCE_COLOR`] parts the theme's accent, so one file
+//!   works in light and dark themes. Show them with [`Ui::icon`],
+//!   [`Button::icon`], [`Button::icon_only`] or [`CollapsingHeader::icon`].
 //! - **Custom drawing**: [`Ui::painter`] or [`Frame::shapes`] accept
 //!   rectangles, circles, lines, polygons, text and images, anti-aliased.
 //! - **Accessibility**: widgets are exposed to screen readers (VoiceOver,
@@ -102,10 +109,11 @@
 //!   the window open (e.g. to ask about unsaved changes).
 //! - **Testing**: [`testing::Harness`] runs your app without a window;
 //!   click widgets by label, type text, press keys, inspect
-//!   [`Context::widgets`].
+//!   [`Context::widgets`] and render the frame to an image.
 //!
 //! The `examples/` directory has a runnable demo for each topic:
-//! `cargo run -p rustroke --example widgets` (and `properties`, `layout`,
+//! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
+//! `files`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
 //!
@@ -121,14 +129,18 @@ pub use rustroke_core::{
     Modifiers, POINTS_PER_SCROLL_LINE, Point, PointerButton, RawInput, Rect, Shape, Stroke,
     TextureId, TexturesDelta, Vec2, point, vec2,
 };
-pub use rustroke_text::{FontFamily, Fonts, TextStyle};
+pub use rustroke_text::{
+    FontFamily, Fonts, ICON_ACCENT_SOURCE_COLOR, IconError, IconId, IconLayer, RasterizedIcon,
+    TextStyle,
+};
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
     Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, ComboBox, Context,
-    CursorIcon, Direction, DragValue, FocusLost, FrameOutput, Grid, Id, InnerResponse, Label,
-    LayerId, Layout, Numeric, Order, Panel, PanelSide, ProgressBar, RadioButton, RepaintHandle,
-    Response, ScrollArea, SelectableLabel, Sense, Separator, Slider, Spinner, Style, TextEdit,
-    TextureHandle, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
+    CursorIcon, Direction, DragValue, FocusLost, FrameOutput, Grid, Icon, Id, InnerResponse, Label,
+    LayerId, Layout, List, ListResponse, Numeric, Order, Panel, PanelSide, ProgressBar,
+    RadioButton, RepaintHandle, Response, ScrollArea, SelectableLabel, Sense, Separator, Slider,
+    Spinner, Style, TextEdit, TextureHandle, Ui, UiRoot, Visuals, Widget, WidgetDescription,
+    WidgetInfo, WidgetRole, Window,
 };
 pub use rustroke_winit::{App, Frame, RunError, WindowOptions, run, testing, wgpu};
 

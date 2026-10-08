@@ -38,6 +38,7 @@ pub struct CollapsingHeader {
     default_open: bool,
     open: Option<bool>,
     selected: Option<bool>,
+    icon: Option<rustroke_text::IconId>,
 }
 
 impl CollapsingHeader {
@@ -50,6 +51,7 @@ impl CollapsingHeader {
             default_open: false,
             open: None,
             selected: None,
+            icon: None,
         }
     }
 
@@ -81,6 +83,12 @@ impl CollapsingHeader {
         self
     }
 
+    /// Shows a 16 point icon before the text (see `Fonts::add_svg_icon`).
+    pub fn icon(mut self, icon: rustroke_text::IconId) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
     /// Shows the header and, while open, the body (indented).
     pub fn show<R>(
         self,
@@ -98,11 +106,14 @@ impl CollapsingHeader {
         // Header: triangle, then the text.
         let icon = style.spacing.icon_size;
         let galley = ui.layout_text(&self.text, &style.body, None);
+        let header_icon = self.icon.and_then(|i| ui.rasterize_icon(i, 16.0));
+        let icon_width = header_icon.as_ref().map_or(0.0, |i| i.size.x + 6.0);
         let height = style.spacing.interact_height;
+        let natural = icon + 4.0 + icon_width + galley.size.x + 8.0;
         let width = if self.selected.is_some() {
-            icon + style.spacing.icon_spacing + galley.size.x + 8.0
+            natural
         } else {
-            ui.available_width()
+            ui.fill_width(natural)
         };
         let rect = ui.allocate_rect(vec2(width, height));
         let toggle_rect = Rect::from_min_size(rect.min, vec2(icon, height));
@@ -148,7 +159,12 @@ impl CollapsingHeader {
             ui.painter().rect_filled(highlight, radius, visuals.bg_fill);
         }
         paint_triangle(ui, toggle_rect.center(), icon * 0.3, openness, visuals.fg);
-        let text_x = toggle_rect.max.x + 4.0;
+        let mut text_x = toggle_rect.max.x + 4.0;
+        if let Some(header_icon) = &header_icon {
+            let pos = point(text_x, rect.center().y - header_icon.size.y / 2.0);
+            ui.paint_icon(pos, header_icon, visuals.fg);
+            text_x += icon_width;
+        }
         ui.painter().galley(
             point(text_x, rect.center().y - galley.size.y / 2.0),
             galley,

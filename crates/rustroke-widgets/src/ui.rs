@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 use rustroke_core::{Color, DisplayList, Galley, InputState, Point, Rect, Vec2};
-use rustroke_text::{Fonts, TextStyle};
+use rustroke_text::{Fonts, IconId, IconLayer, RasterizedIcon, TextStyle};
 
 use crate::grid::GridLayout;
 use crate::widgets::{
@@ -334,9 +334,18 @@ impl<'a> Ui<'a> {
         Rect::from_min_max(rect.min, rect.max.max(rect.min))
     }
 
-    /// Width left for the next widget.
+    /// Width left for the next widget. Infinite inside a horizontally
+    /// scrolling area: widgets that fill the width should then use
+    /// their natural size (see [`Ui::fill_width`]).
     pub fn available_width(&self) -> f32 {
         self.available_rect().width()
+    }
+
+    /// The available width, or `natural` when it is unlimited (inside a
+    /// horizontally scrolling area). For widgets that fill the width.
+    pub fn fill_width(&self, natural: f32) -> f32 {
+        let width = self.available_width();
+        if width.is_finite() { width } else { natural }
     }
 
     /// Lays out text with this frame's pixel density.
@@ -348,6 +357,28 @@ impl<'a> Ui<'a> {
     ) -> Arc<Galley> {
         let ppp = self.pixels_per_point();
         self.fonts.layout(text, style, wrap_width, ppp)
+    }
+
+    /// The icon rasterized for this Ui's screen density and theme (see
+    /// `Fonts::add_svg_icon`), fitting a `size` point square.
+    pub fn rasterize_icon(&mut self, id: IconId, size: f32) -> Option<RasterizedIcon> {
+        let ppp = self.pixels_per_point();
+        let dark = self.style.visuals.dark_mode;
+        self.fonts.icon(id, size, ppp, dark)
+    }
+
+    /// Draws a rasterized icon with its top-left at `pos`: line parts in
+    /// `line_color`, accent parts in the theme's accent color.
+    pub fn paint_icon(&mut self, pos: Point, icon: &RasterizedIcon, line_color: Color) {
+        let accent = self.style.visuals.accent;
+        for (layer, galley) in &icon.layers {
+            let color = match layer {
+                IconLayer::Line => line_color,
+                IconLayer::Accent => accent,
+                IconLayer::Original => Color::WHITE,
+            };
+            self.painter().galley(pos, Arc::clone(galley), color);
+        }
     }
 
     // ---- Ids ----
@@ -731,6 +762,11 @@ impl<'a> Ui<'a> {
     /// A rotating activity indicator.
     pub fn spinner(&mut self) -> Response {
         self.add(crate::Spinner::new())
+    }
+
+    /// Shows an SVG icon at 16 points (see [`crate::Icon`] for options).
+    pub fn icon(&mut self, icon: IconId) -> Response {
+        self.add(crate::Icon::new(icon))
     }
 
     /// Shows an image at one point per pixel (see [`crate::Image`] for options).

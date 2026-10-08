@@ -6,7 +6,15 @@
 //!
 //! The bundled *Inter* font (SIL Open Font License, see `fonts/`) is the
 //! default proportional font, so text looks the same on every platform.
+//! A bundled symbol font (*Rustroke Symbols*, a subset of Noto Sans Math,
+//! Symbols and Symbols 2, also OFL) covers arrows, math and technical
+//! symbols, shapes and dingbats (↶ ⚓ ∥ ⊥ ⌀ ✓ ★ ⚙), even without system
+//! fonts.
 //! System fonts are used for monospace and as fallback (emoji, CJK, ...).
+
+mod icons;
+
+pub use icons::{ICON_ACCENT_SOURCE_COLOR, IconError, IconId, IconLayer, RasterizedIcon};
 
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash, Hasher};
@@ -19,6 +27,7 @@ use rustroke_core::{AtlasRegion, Color, Galley, GalleyRow, GlyphQuad, TextureAtl
 
 const INTER_REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
 const INTER_BOLD: &[u8] = include_bytes!("../fonts/Inter-Bold.ttf");
+const SYMBOLS: &[u8] = include_bytes!("../fonts/RustrokeSymbols-Regular.ttf");
 const PROPORTIONAL_FAMILY: &str = "Inter";
 
 /// Initial atlas side; it doubles when full, up to [`MAX_ATLAS_SIZE`].
@@ -110,6 +119,8 @@ pub struct Fonts {
     galleys: HashMap<u64, (Arc<Galley>, u64)>,
     frame: u64,
     hasher: std::hash::RandomState,
+    icons: Vec<icons::IconSource>,
+    icon_cache: icons::IconCache,
 }
 
 impl std::fmt::Debug for Fonts {
@@ -158,6 +169,8 @@ impl Fonts {
             galleys: HashMap::new(),
             frame: 0,
             hasher: std::hash::RandomState::new(),
+            icons: Vec::new(),
+            icon_cache: HashMap::new(),
         }
     }
 
@@ -359,6 +372,7 @@ impl Fonts {
                 self.atlas.clear();
                 self.glyphs.clear();
                 self.galleys.clear();
+                self.icon_cache.clear();
             }
         }
     }
@@ -389,6 +403,8 @@ fn row_carets(base: usize, run: &cosmic_text::LayoutRun<'_>) -> GalleyRow {
 fn load_bundled(db: &mut cosmic_text::fontdb::Database) {
     db.load_font_data(INTER_REGULAR.to_vec());
     db.load_font_data(INTER_BOLD.to_vec());
+    // Found by font fallback for characters Inter doesn't have.
+    db.load_font_data(SYMBOLS.to_vec());
 }
 
 fn platform_monospace() -> &'static str {
@@ -422,6 +438,25 @@ mod tests {
 
     fn fonts() -> Fonts {
         Fonts::bundled_only()
+    }
+
+    /// TXT-04: symbols render without system fonts (no repeated "tofu"
+    /// box: each symbol gets its own bitmap).
+    #[test]
+    fn bundled_symbols_have_glyphs() {
+        let mut fonts = fonts();
+        let style = TextStyle::proportional(16.0);
+        let symbols = "↶↷⚓∥⊥⌀⚙✓★";
+        let galley = fonts.layout(symbols, &style, None, 1.0);
+        assert_eq!(galley.glyphs.len(), symbols.chars().count());
+        let mut regions: Vec<_> = galley
+            .glyphs
+            .iter()
+            .map(|g| (g.region.x, g.region.y))
+            .collect();
+        regions.sort_unstable();
+        regions.dedup();
+        assert_eq!(regions.len(), symbols.chars().count(), "all distinct");
     }
 
     #[test]

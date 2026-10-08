@@ -789,3 +789,64 @@ fn properties_2x() {
         check_snapshot("properties_2x", size, &pixels);
     }
 }
+
+/// v0.4: two-tone SVG icons (light theme), a list with a selected row and
+/// a horizontally scrolling strip.
+fn lists_scene(fonts: &mut Fonts, pixels_per_point: f32) -> DisplayList {
+    use rustroke_core::{Point, RawInput};
+    use rustroke_widgets::{Button, CentralPanel, Context, List, Panel, ScrollArea, Style};
+
+    const ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="#000" stroke-width="1.6"/>
+      <circle cx="12" cy="12" r="3.5" fill="#1E6FFF"/></svg>"##;
+    let icon = fonts.add_svg_icon(ICON).unwrap();
+    let screen = Rect::from_min_size(Point::ZERO, vec2(420.0, 300.0));
+    let mut ctx = Context::new();
+    ctx.set_style(Style::light());
+    let mut list = DisplayList::new();
+    let mut items = vec!["Base plate", "Shaft", "Holes"];
+    let mut selection = vec![1];
+    for frame in 0..4 {
+        ctx.begin_frame(RawInput {
+            time: f64::from(frame),
+            screen_rect: screen,
+            pixels_per_point,
+            events: Vec::new(),
+        });
+        let mut root = (&mut ctx, &mut *fonts);
+        Panel::bottom("strip").show(&mut root, |ui| {
+            ScrollArea::horizontal().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for _ in 0..20 {
+                        ui.add(Button::icon_only(icon).frame(false));
+                    }
+                });
+            });
+        });
+        Panel::left("list").auto_width().show(&mut root, |ui| {
+            List::new("items").show(ui, &mut items, &mut selection, |ui, _, item| {
+                ui.icon(icon);
+                ui.label(*item);
+            });
+        });
+        CentralPanel.show(&mut root, |ui| {
+            ui.add(Button::new("Hole").icon(icon).selected(true));
+            ui.add(Button::new("Hole").icon(icon));
+            ui.label("Symbols: ↶ ↷ ⚓ ∥ ⊥ ⌀ ✓");
+        });
+        let mut output = ctx.end_frame();
+        list = std::mem::take(&mut output.shapes);
+    }
+    list
+}
+
+#[test]
+fn lists_light_2x() {
+    let mut fonts = Fonts::bundled_only();
+    let list = lists_scene(&mut fonts, 2.0);
+    let size = PhysicalSize::new(840, 600);
+    let clear = rustroke_widgets::Style::light().visuals.background;
+    if let Some(pixels) = render_with_clear(&list, size, 2.0, fonts.atlas_mut(), clear) {
+        check_snapshot("lists_light_2x", size, &pixels);
+    }
+}

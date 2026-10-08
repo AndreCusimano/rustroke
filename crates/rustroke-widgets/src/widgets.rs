@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 use rustroke_core::{Color, Galley, Key, Modifiers, Point, Rect, Stroke, Vec2, point, vec2};
-use rustroke_text::TextStyle;
+use rustroke_text::{IconId, TextStyle};
 
 use crate::{CursorIcon, NumericInfo, Response, Sense, Ui, WidgetInfo, WidgetRole};
 
@@ -29,6 +29,12 @@ fn paint_focus_ring(ui: &mut Ui<'_>, response: &Response, rect: Rect, corner_rad
 
 /// Space between a menu item's text and its shortcut.
 const SHORTCUT_GAP: f32 = 24.0;
+
+/// Size of icons in buttons and [`Icon`]s unless set.
+const DEFAULT_ICON_SIZE: f32 = 16.0;
+
+/// Space between an icon and the text after it.
+const ICON_TEXT_GAP: f32 = 6.0;
 
 /// Top-left position that vertically centers `galley` in `rect`, starting at `x`.
 fn text_pos(rect: Rect, x: f32, galley: &Galley) -> Point {
@@ -79,7 +85,9 @@ impl Widget for Label {
         let style = ui.style();
         let text_style = self.style.unwrap_or_else(|| style.body.clone());
         // Rows grow sideways, so text there stays on one line.
-        let wrap = (self.wrap && !ui.layout().is_horizontal()).then(|| ui.available_width());
+        let wrap = (self.wrap && !ui.layout().is_horizontal())
+            .then(|| ui.available_width())
+            .filter(|w| w.is_finite());
         let galley = ui.layout_text(&self.text, &text_style, wrap);
         let response = ui.allocate_response(galley.size, Sense::HOVER);
         ui.describe(
@@ -92,11 +100,14 @@ impl Widget for Label {
     }
 }
 
-/// A clickable button with a text label.
+/// A clickable button with a text label, an icon, or both.
 #[derive(Clone, Debug)]
 pub struct Button {
     text: String,
+    icon: Option<IconId>,
+    icon_size: f32,
     frame: bool,
+    selected: bool,
     accessible_label: Option<String>,
     shortcut_text: String,
 }
@@ -106,10 +117,38 @@ impl Button {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
+            icon: None,
+            icon_size: DEFAULT_ICON_SIZE,
             frame: true,
+            selected: false,
             accessible_label: None,
             shortcut_text: String::new(),
         }
+    }
+
+    /// A button showing only an icon (toolbars). Give it a name for screen
+    /// readers and tests with [`Button::accessible_label`], and usually a
+    /// tooltip ([`Response::on_hover_text`]).
+    pub fn icon_only(icon: IconId) -> Self {
+        Self::new("").icon(icon)
+    }
+
+    /// Shows `icon` before the text (see `Fonts::add_svg_icon`).
+    pub fn icon(mut self, icon: IconId) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// Size of the icon in points (default 16; 20–24 suit toolbars).
+    pub fn icon_size(mut self, size: f32) -> Self {
+        self.icon_size = size;
+        self
+    }
+
+    /// Highlights the button as the current choice (e.g. the active tool).
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
     }
 
     /// Text shown after the label in a weak color, typically the keyboard
@@ -143,14 +182,27 @@ impl Button {
 impl Widget for Button {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
-        let padding = style.spacing.button_padding;
+        let has_text = !self.text.is_empty();
+        let mut padding = style.spacing.button_padding;
+        let icon = self
+            .icon
+            .and_then(|id| ui.rasterize_icon(id, self.icon_size));
+        if icon.is_some() && !has_text {
+            // Square-ish icon buttons.
+            padding.x = padding.y.max(6.0);
+        }
         let galley = ui.layout_text(&self.text, &style.body, None);
         let shortcut = (!self.shortcut_text.is_empty())
             .then(|| ui.layout_text(&self.shortcut_text, &style.body, None));
         let shortcut_width = shortcut.as_ref().map_or(0.0, |g| g.size.x + SHORTCUT_GAP);
+        let icon_width = icon.as_ref().map_or(0.0, |i| {
+            i.size.x + if has_text { ICON_TEXT_GAP } else { 0.0 }
+        });
+        let content_height = galley.size.y.max(icon.as_ref().map_or(0.0, |i| i.size.y));
+        let content_width = icon_width + if has_text { galley.size.x } else { 0.0 };
         let size = vec2(
-            galley.size.x + shortcut_width + 2.0 * padding.x,
-            (galley.size.y + 2.0 * padding.y).max(style.spacing.interact_height),
+            content_width + shortcut_width + 2.0 * padding.x,
+            (content_height + 2.0 * padding.y).max(style.spacing.interact_height),
         );
         let id = ui.next_auto_id();
         let mut rect = ui.allocate_rect(size);
@@ -160,36 +212,44 @@ impl Widget for Button {
             rect = Rect::from_min_size(rect.min, vec2(rect.width().max(width), rect.height()));
         }
         let response = ui.interact(id, rect, Sense::CLICK);
-        ui.describe(
-            &response,
-            WidgetInfo::new(
-                WidgetRole::Button,
-                self.accessible_label
-                    .clone()
-                    .unwrap_or_else(|| self.text.clone()),
-            ),
+        let mut info = WidgetInfo::new(
+            WidgetRole::Button,
+            self.accessible_label
+                .clone()
+                .unwrap_or_else(|| self.text.clone()),
         );
+        if self.selected {
+            info = info.selected(true);
+        }
+        ui.describe(&response, info);
         if response.clicked() && menu_width.is_some() {
             ui.close_menu();
         }
 
         let visuals = ui.widget_visuals(&response);
         let radius = style.visuals.corner_radius;
-        if self.frame && menu_width.is_none() {
+        if self.selected {
+            let fill = style.visuals.selection;
+            ui.painter().rect_filled(rect, radius, fill);
+        } else if self.frame && menu_width.is_none() {
             ui.painter()
                 .rect(rect, radius, visuals.bg_fill, visuals.stroke);
         } else if response.hovered() || response.is_pressed() {
             ui.painter().rect_filled(rect, radius, visuals.bg_fill);
         }
-        let pos = if menu_width.is_some() {
-            point(
-                rect.min.x + padding.x,
-                rect.center().y - galley.size.y / 2.0,
-            )
+        let left = if menu_width.is_some() {
+            rect.min.x + padding.x
         } else {
-            rect.center() - galley.size / 2.0 - vec2(shortcut_width / 2.0, 0.0)
+            rect.center().x - (content_width + shortcut_width) / 2.0
         };
-        ui.painter().galley(pos, galley, visuals.fg);
+        if let Some(icon) = &icon {
+            let pos = point(left, rect.center().y - icon.size.y / 2.0);
+            ui.paint_icon(pos, icon, visuals.fg);
+        }
+        if has_text {
+            let pos = point(left + icon_width, rect.center().y - galley.size.y / 2.0);
+            ui.painter().galley(pos, galley, visuals.fg);
+        }
         if let Some(shortcut) = shortcut {
             // Right-aligned, so shortcuts form a column in menus.
             let x = rect.max.x - padding.x - shortcut.size.x;
@@ -198,6 +258,71 @@ impl Widget for Button {
                 .galley(text_pos(rect, x, &shortcut), shortcut, color);
         }
         paint_focus_ring(ui, &response, rect, radius);
+        response
+    }
+}
+
+/// An SVG icon loaded with `Fonts::add_svg_icon`, drawn in the text color
+/// (line parts) and the accent color (accent parts).
+#[derive(Clone, Debug)]
+pub struct Icon {
+    id: IconId,
+    size: f32,
+    color: Option<Color>,
+    sense: Sense,
+    accessible_label: String,
+}
+
+impl Icon {
+    /// The icon at 16 points.
+    pub fn new(id: IconId) -> Self {
+        Self {
+            id,
+            size: DEFAULT_ICON_SIZE,
+            color: None,
+            sense: Sense::HOVER,
+            accessible_label: String::new(),
+        }
+    }
+
+    /// Size in points (the icon fits a square of this side).
+    pub fn size(mut self, size: f32) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// Color of the line parts (default: the text color).
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    /// Makes the icon react to the pointer (e.g. clickable).
+    pub fn sense(mut self, sense: Sense) -> Self {
+        self.sense = sense;
+        self
+    }
+
+    /// What the icon means, read by screen readers.
+    pub fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = label.into();
+        self
+    }
+}
+
+impl Widget for Icon {
+    fn ui(self, ui: &mut Ui<'_>) -> Response {
+        let icon = ui.rasterize_icon(self.id, self.size);
+        let size = icon.as_ref().map_or(Vec2::splat(self.size), |i| i.size);
+        let response = ui.allocate_response(size, self.sense);
+        ui.describe(
+            &response,
+            WidgetInfo::new(WidgetRole::Image, self.accessible_label),
+        );
+        if let Some(icon) = icon {
+            let color = self.color.unwrap_or(ui.style().visuals.text);
+            ui.paint_icon(response.rect.min, &icon, color);
+        }
         response
     }
 }
@@ -509,7 +634,7 @@ impl Widget for ProgressBar {
         let height = galley.as_ref().map_or(8.0, |g| g.size.y + 4.0).max(8.0);
         let width = self
             .desired_width
-            .unwrap_or_else(|| ui.available_width())
+            .unwrap_or_else(|| ui.fill_width(style.spacing.slider_width))
             .max(height);
         let response = ui.allocate_response(vec2(width, height), Sense::HOVER);
         let label = text.clone().unwrap_or_else(|| "Progress".to_owned());
@@ -975,7 +1100,7 @@ impl Widget for Separator {
         let in_row = ui.layout().is_horizontal();
         // In a menu, span the menu (its width is measured from the items,
         // so the separator must not widen it).
-        let width = ui.in_menu().unwrap_or_else(|| ui.available_width());
+        let width = ui.in_menu().unwrap_or_else(|| ui.fill_width(0.0));
         let size = if in_row {
             vec2(1.0, style.spacing.interact_height)
         } else {

@@ -67,6 +67,7 @@ pub struct Panel {
     id: Id,
     default_size: Option<f32>,
     resizable: bool,
+    auto_width: bool,
 }
 
 impl Panel {
@@ -76,6 +77,7 @@ impl Panel {
             id: Id::new("panel").with(id_salt),
             default_size: None,
             resizable: matches!(side, PanelSide::Left | PanelSide::Right),
+            auto_width: false,
         }
     }
 
@@ -103,6 +105,14 @@ impl Panel {
     /// content has been measured).
     pub fn default_size(mut self, size: f32) -> Self {
         self.default_size = Some(size);
+        self
+    }
+
+    /// A side panel exactly as wide as its content (text doesn't wrap),
+    /// instead of a width the user drags. Turns off resizing.
+    pub fn auto_width(mut self) -> Self {
+        self.auto_width = true;
+        self.resizable = false;
         self
     }
 
@@ -184,15 +194,25 @@ impl Panel {
                 r
             });
 
-            let content = ui.scope_with(
-                rect.expand(-pad),
-                Layout::top_down(Align::Min),
-                add_contents,
-            );
-            let mut new_size = if vertical_side {
+            let auto_width = self.auto_width && vertical_side;
+            let mut content_rect = rect.expand(-pad);
+            if auto_width {
+                // Measure the content at its natural width.
+                content_rect.max.x = f32::INFINITY;
+            }
+            let content = ui.scope_with(content_rect, Layout::top_down(Align::Min), add_contents);
+            let used = content.response.rect;
+            let mut new_size = if auto_width {
+                let width = if used.is_empty() {
+                    0.0
+                } else {
+                    used.max.x - content_rect.min.x
+                };
+                (width + 2.0 * pad).min(available.width()).round()
+            } else if vertical_side {
                 size
             } else {
-                content.response.rect.height() + 2.0 * pad
+                used.height() + 2.0 * pad
             };
 
             ui.clip_rect_restore(unclipped);
@@ -455,16 +475,25 @@ impl<'open> Window<'open> {
 /// Scroll position and content size, kept between frames.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct ScrollState {
-    offset: f32,
-    content_height: Option<f32>,
+    offset: Vec2,
+    /// Size of the content last frame (`None` before the first frame).
+    content_size: Option<Vec2>,
 }
 
-/// A vertically scrolling area: content taller than the area is clipped
-/// and can be scrolled with the mouse wheel or by dragging the scroll bar.
+/// A scrolling area: content larger than the area is clipped and can be
+/// scrolled with the mouse wheel (Shift+wheel, or a trackpad, sideways) or
+/// by dragging the scroll bars. Vertical by default; see
+/// [`ScrollArea::horizontal`] and [`ScrollArea::both`].
+///
+/// In a horizontally scrolling area the content has unlimited width: text
+/// doesn't wrap and widgets that would fill the width use their natural
+/// size instead.
 #[derive(Clone, Debug)]
 pub struct ScrollArea {
     id_salt: Option<Id>,
-    max_height: f32,
+    /// Scrolls along x, y.
+    enabled: [bool; 2],
+    max_size: Vec2,
     auto_shrink: bool,
 }
 
@@ -475,24 +504,47 @@ impl Default for ScrollArea {
 }
 
 impl ScrollArea {
-    /// A vertically scrolling area.
-    pub fn vertical() -> Self {
+    fn new(enabled: [bool; 2]) -> Self {
         Self {
             id_salt: None,
-            max_height: f32::INFINITY,
+            enabled,
+            max_size: Vec2::splat(f32::INFINITY),
             auto_shrink: true,
         }
+    }
+
+    /// A vertically scrolling area.
+    pub fn vertical() -> Self {
+        Self::new([false, true])
+    }
+
+    /// A horizontally scrolling area (e.g. a wide table or a timeline).
+    pub fn horizontal() -> Self {
+        Self::new([true, false])
+    }
+
+    /// An area scrolling in both directions.
+    pub fn both() -> Self {
+        Self::new([true, true])
     }
 
     /// The area is at most this tall (it is also limited by the space
     /// available in the parent).
     pub fn max_height(mut self, height: f32) -> Self {
-        self.max_height = height;
+        self.max_size.y = height;
         self
     }
 
-    /// Shrink to the content when it is shorter than the maximum height
-    /// (default `true`). With `false` the area always takes the maximum.
+    /// The area is at most this wide (it is also limited by the space
+    /// available in the parent).
+    pub fn max_width(mut self, width: f32) -> Self {
+        self.max_size.x = width;
+        self
+    }
+
+    /// Shrink to the content when it is smaller than the maximum size
+    /// along the scrolling directions (default `true`). With `false` the
+    /// area always takes the maximum.
     pub fn auto_shrink(mut self, shrink: bool) -> Self {
         self.auto_shrink = shrink;
         self
@@ -516,81 +568,156 @@ impl ScrollArea {
             None => ui.next_auto_id(),
         };
         let style = ui.style();
-        let bar_width = style.spacing.scrollbar_width;
+        let bar = style.spacing.scrollbar_width;
+        let gap = 4.0;
+        let [scroll_x, scroll_y] = self.enabled;
         let mut state: ScrollState = ui.ctx().data(id).unwrap_or_default();
+        let prev_content = state.content_size;
 
+        // Which bars are needed, from last frame's content size.
         let available = ui.available_rect();
-        let mut height = self.max_height.min(available.height());
-        if self.auto_shrink
-            && let Some(content) = state.content_height
-        {
-            height = height.min(content);
-        }
-        let viewport = ui.allocate_rect(vec2(available.width(), height.max(0.0)));
-        let max_offset = |content: f32| (content - viewport.height()).max(0.0);
-        state.offset = state
-            .offset
-            .clamp(0.0, max_offset(state.content_height.unwrap_or(0.0)));
+        // Along a direction that doesn't scroll the area is as big as its
+        // content (like any widget), even beyond the available space: a
+        // horizontal area in a panel sized by its content must not start
+        // at zero height.
+        let max = vec2(
+            self.max_size.x.min(available.width()),
+            if scroll_y {
+                self.max_size.y.min(available.height())
+            } else {
+                self.max_size.y
+            },
+        );
+        let overflows = |content: Option<Vec2>, axis: usize, room: f32| {
+            content.is_some_and(|c| [c.x, c.y][axis] > room + 0.5)
+        };
+        let show_y = scroll_y && overflows(prev_content, 1, max.y);
+        let show_x = scroll_x
+            && overflows(
+                prev_content,
+                0,
+                max.x - if show_y { bar + gap } else { 0.0 },
+            );
+        let bar_room = vec2(
+            if show_y { bar + gap } else { 0.0 },
+            if show_x { bar + gap } else { 0.0 },
+        );
 
-        // Content, shifted up by the scroll offset and clipped to the viewport.
-        let content_origin = point(viewport.min.x, viewport.min.y - state.offset);
+        // The viewport: the maximum size, shrunk to the content along the
+        // scrolling directions. Non-scrolling directions keep the old
+        // behavior: full width, content height.
+        let mut size = max;
+        if let Some(content) = prev_content {
+            if !scroll_y || self.auto_shrink {
+                size.y = size.y.min(content.y + bar_room.y);
+            }
+            if scroll_x && self.auto_shrink {
+                size.x = size.x.min(content.x + bar_room.x);
+            }
+        } else if !scroll_y {
+            size.y = 0.0;
+        }
+        let viewport = ui.allocate_rect(vec2(size.x.max(0.0), size.y.max(0.0)));
+        let inner = Rect::from_min_max(viewport.min, viewport.max - bar_room);
+        let max_offset = |content: Vec2| {
+            vec2(
+                (content.x - inner.width()).max(0.0),
+                (content.y - inner.height()).max(0.0),
+            )
+        };
+        let clamp = |offset: Vec2, content: Vec2| {
+            let m = max_offset(content);
+            vec2(offset.x.clamp(0.0, m.x), offset.y.clamp(0.0, m.y))
+        };
+        state.offset = clamp(state.offset, prev_content.unwrap_or(Vec2::ZERO));
+
+        // Content, shifted by the scroll offset and clipped to the viewport.
+        let origin = inner.min - state.offset;
         let content_max = Rect::from_min_max(
-            content_origin,
-            point(viewport.max.x - bar_width - 4.0, f32::INFINITY),
+            origin,
+            point(
+                if scroll_x { f32::INFINITY } else { inner.max.x },
+                f32::INFINITY,
+            ),
         );
         let saved_clip = ui.clip_rect();
-        ui.set_clip_rect(viewport);
+        ui.set_clip_rect(inner);
         let content =
             ui.scope_with_no_advance(content_max, Layout::top_down(Align::Min), add_contents);
-        let content_height = content.response.rect.max.y - content_origin.y;
+        let used = content.response.rect;
+        let content_size = if used.is_empty() {
+            Vec2::ZERO
+        } else {
+            used.max - origin
+        };
+        ui.clip_rect_restore(saved_clip);
+        ui.set_clip_rect(viewport);
 
-        // Mouse wheel, unless a nested area already used it.
+        // Mouse wheel, unless a nested area already used it. A vertical
+        // wheel scrolls sideways in horizontal-only areas or with Shift.
         let area = ui.interact(id.with("area"), viewport, Sense::HOVER);
         let mut offset = state.offset;
-        let scroll = ui.input().scroll_delta.y;
-        if area.hovered() && scroll != 0.0 {
-            offset -= scroll;
-            ui.ctx().input_mut().scroll_delta.y = 0.0;
+        if area.hovered() {
+            let mut delta = ui.input().scroll_delta;
+            if scroll_x && (!scroll_y || ui.input().modifiers.shift) && delta.x == 0.0 {
+                delta = vec2(delta.y, 0.0);
+            }
+            let used_x = if scroll_x { delta.x } else { 0.0 };
+            let used_y = if scroll_y { delta.y } else { 0.0 };
+            offset -= vec2(used_x, used_y);
+            let input = ui.ctx().input_mut();
+            if used_x != 0.0 {
+                input.scroll_delta.x = 0.0;
+                if !scroll_y {
+                    input.scroll_delta.y = 0.0;
+                }
+            }
+            if used_y != 0.0 {
+                input.scroll_delta.y = 0.0;
+            }
         }
 
-        // Scroll bar.
-        if content_height > viewport.height() {
+        // Scroll bars.
+        let max_off = max_offset(content_size);
+        if show_y && content_size.y > inner.height() {
             let track = Rect::from_min_max(
-                point(viewport.max.x - bar_width, viewport.min.y),
-                viewport.max,
+                point(viewport.max.x - bar, viewport.min.y),
+                point(viewport.max.x, inner.max.y),
             );
-            let ratio = viewport.height() / content_height;
-            let thumb_height = (track.height() * ratio).max(20.0).min(track.height());
-            let travel = track.height() - thumb_height;
-            let t = if max_offset(content_height) > 0.0 {
-                offset / max_offset(content_height)
-            } else {
-                0.0
-            };
-            let thumb = Rect::from_min_size(
-                point(track.min.x, track.min.y + travel * t.clamp(0.0, 1.0)),
-                vec2(bar_width, thumb_height),
+            offset.y = scroll_bar(
+                ui,
+                id.with("bar"),
+                track,
+                1,
+                inner.height(),
+                content_size.y,
+                offset.y,
+                max_off.y,
             );
-            let r = ui.interact(id.with("bar"), thumb, Sense::POINTER_DRAG);
-            if r.dragged() && travel > 0.0 {
-                offset += r.drag_delta().y / travel * max_offset(content_height);
-            }
-            let color = ui.widget_visuals(&r).bg_fill;
-            let color = if r.hovered() || r.dragged() {
-                style.visuals.active.stroke.color
-            } else {
-                color
-            };
-            ui.painter().rect_filled(thumb, bar_width / 2.0, color);
+        }
+        if show_x && content_size.x > inner.width() {
+            let track = Rect::from_min_max(
+                point(viewport.min.x, viewport.max.y - bar),
+                point(inner.max.x, viewport.max.y),
+            );
+            offset.x = scroll_bar(
+                ui,
+                id.with("hbar"),
+                track,
+                0,
+                inner.width(),
+                content_size.x,
+                offset.x,
+                max_off.x,
+            );
         }
         ui.clip_rect_restore(saved_clip);
 
-        let offset = offset.clamp(0.0, max_offset(content_height));
         let new_state = ScrollState {
-            offset,
-            content_height: Some(content_height),
+            offset: clamp(offset, content_size),
+            content_size: Some(content_size),
         };
-        if new_state != state || state.content_height.is_none() {
+        if new_state != state || prev_content != Some(content_size) {
             ui.ctx().insert_data(id, new_state);
             ui.ctx().request_repaint();
         }
@@ -601,4 +728,53 @@ impl ScrollArea {
             response,
         }
     }
+}
+
+/// Draws a scroll bar along `axis` (0 = x, 1 = y) in `track` and returns
+/// the offset after dragging its thumb.
+#[allow(clippy::too_many_arguments)]
+fn scroll_bar(
+    ui: &mut Ui<'_>,
+    id: Id,
+    track: Rect,
+    axis: usize,
+    visible: f32,
+    content: f32,
+    offset: f32,
+    max_offset: f32,
+) -> f32 {
+    let style = ui.style();
+    let len = |v: Vec2| if axis == 0 { v.x } else { v.y };
+    let track_len = len(track.size());
+    let thumb_len = (track_len * visible / content).max(20.0).min(track_len);
+    let travel = track_len - thumb_len;
+    let t = if max_offset > 0.0 {
+        (offset / max_offset).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let thumb = if axis == 0 {
+        Rect::from_min_size(
+            point(track.min.x + travel * t, track.min.y),
+            vec2(thumb_len, track.height()),
+        )
+    } else {
+        Rect::from_min_size(
+            point(track.min.x, track.min.y + travel * t),
+            vec2(track.width(), thumb_len),
+        )
+    };
+    let r = ui.interact(id, thumb, Sense::POINTER_DRAG);
+    let mut offset = offset;
+    if r.dragged() && travel > 0.0 {
+        offset += len(r.drag_delta()) / travel * max_offset;
+    }
+    let color = if r.hovered() || r.dragged() {
+        style.visuals.active.stroke.color
+    } else {
+        ui.widget_visuals(&r).bg_fill
+    };
+    let radius = style.spacing.scrollbar_width / 2.0;
+    ui.painter().rect_filled(thumb, radius, color);
+    offset
 }

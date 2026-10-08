@@ -20,6 +20,7 @@ arboard.workspace = true
 accesskit.workspace = true
 accesskit_winit.workspace = true
 log.workspace = true
+png.workspace = true
 rustroke-core.workspace = true
 rustroke-render.workspace = true
 rustroke-text.workspace = true
