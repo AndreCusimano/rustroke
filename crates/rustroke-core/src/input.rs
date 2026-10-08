@@ -3,6 +3,10 @@
 
 use crate::{Point, Rect, Vec2};
 
+/// Points scrolled by one notch of a mouse wheel ([`Event::Scroll`] of a
+/// wheel that reports "lines" is converted with this factor).
+pub const POINTS_PER_SCROLL_LINE: f32 = 50.0;
+
 /// A mouse (or touchpad) button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PointerButton {
@@ -390,6 +394,14 @@ impl InputState {
         self.screen_rect = raw.screen_rect;
         self.pixels_per_point = raw.pixels_per_point;
         self.events = raw.events;
+    }
+
+    /// Takes this frame's scrolling, leaving none for widgets handled later
+    /// (e.g. a 3D view inside a [scroll area] keeps the wheel for zooming).
+    ///
+    /// [scroll area]: https://docs.rs/rustroke/latest/rustroke/struct.ScrollArea.html
+    pub fn consume_scroll(&mut self) -> Vec2 {
+        std::mem::replace(&mut self.scroll_delta, Vec2::ZERO)
     }
 
     /// True if `key` was pressed this frame, with any modifiers.

@@ -1368,3 +1368,135 @@ fn grid_cells_allow_desired_widths() {
     }
     assert_eq!(width, 110.0);
 }
+
+// ---- v0.2.0 (CAD3D requests) ----
+
+/// INP-02: responses report where the pointer is.
+#[test]
+fn responses_report_pointer_positions() {
+    let mut h = Harness::new();
+    let rect = button_frame(&mut h, vec![]).rect;
+    let p = rect.min + vec2(5.0, 6.0);
+    let r = button_frame(&mut h, vec![move_to(p)]);
+    assert_eq!(r.hover_pos(), Some(p));
+    assert_eq!(r.interact_pointer_pos(), None);
+    let r = button_frame(&mut h, vec![button(p, true)]);
+    assert_eq!(r.interact_pointer_pos(), Some(p));
+    let outside = point(390.0, 290.0);
+    let r = button_frame(&mut h, vec![move_to(outside)]);
+    assert_eq!(r.hover_pos(), None);
+    assert_eq!(
+        r.interact_pointer_pos(),
+        Some(outside),
+        "still pressed outside"
+    );
+}
+
+/// INP-03: a widget can take the scrolling so a parent scroll area doesn't move.
+#[test]
+fn consumed_scroll_does_not_scroll_the_parent() {
+    let mut h = Harness::new();
+    let mut taken = vec2(0.0, 0.0);
+    let mut first_y = 0.0;
+    for (i, events) in [
+        vec![],
+        vec![],
+        vec![move_to(point(10.0, 10.0)), scroll(-80.0)],
+        vec![],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        h.frame(events, |ui| {
+            ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                let r = ui.button("viewport");
+                if r.hovered() {
+                    let d = ui.input_mut().consume_scroll();
+                    if d.y != 0.0 {
+                        taken = d;
+                    }
+                }
+                if i == 3 {
+                    first_y = r.rect.min.y;
+                }
+                for k in 0..20 {
+                    ui.label(format!("row {k}"));
+                }
+            });
+        });
+    }
+    assert_eq!(taken, vec2(0.0, -80.0));
+    assert_eq!(first_y, 0.0, "the scroll area didn't scroll");
+}
+
+/// INT-03: repaint handles call the platform's wake-up from any thread.
+#[test]
+fn repaint_handle_wakes_the_platform() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let mut ctx = Context::new();
+    ctx.repaint_handle().request_repaint(); // not connected: no-op
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&calls);
+    ctx.set_repaint_callback(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    });
+    let handle = ctx.repaint_handle();
+    std::thread::spawn(move || handle.request_repaint())
+        .join()
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// INT-05: replacing a texture keeps its id and uploads the new image.
+#[test]
+fn texture_handles_can_be_updated_in_place() {
+    use rustroke_core::ColorImage;
+    let mut h = Harness::new();
+    let handle = h
+        .ctx
+        .load_texture(ColorImage::from_rgba_unmultiplied([1, 1], &[0; 4]));
+    h.frame(vec![], |_| {});
+    handle.set(ColorImage::from_rgba_unmultiplied([2, 1], &[255; 8]));
+    let out = h.frame(vec![], |_| {});
+    assert_eq!(out.textures.set.len(), 1);
+    assert_eq!(out.textures.set[0].0, handle.id());
+    assert_eq!(handle.size(), [2, 1]);
+    assert!(out.textures.free.is_empty());
+}
+
+/// TST-03: the widgets of the last frame are listed even without a screen reader.
+#[test]
+fn widget_list_is_available_without_accessibility() {
+    let mut h = Harness::new();
+    let mut on = true;
+    h.frame(vec![], |ui| {
+        ui.label("Title");
+        ui.add(crate::Checkbox::new(&mut on, "").accessible_label("Option"));
+    });
+    assert!(!h.ctx.is_accessibility_active());
+    let labels: Vec<&str> = h
+        .ctx
+        .widgets()
+        .iter()
+        .map(|w| w.info.label.as_str())
+        .collect();
+    assert_eq!(labels, ["Title", "Option"]);
+    let option = h.ctx.find_widget("Option").unwrap();
+    assert_eq!(option.info.toggled, Some(true));
+    assert!(option.focusable);
+}
+
+/// STY-01: semantic colors differ between themes.
+#[test]
+fn semantic_colors_exist_in_both_themes() {
+    let (dark, light) = (crate::Visuals::dark(), crate::Visuals::light());
+    for (d, l) in [
+        (dark.success, light.success),
+        (dark.warning, light.warning),
+        (dark.error, light.error),
+        (dark.info, light.info),
+    ] {
+        assert_ne!(d, l);
+    }
+}

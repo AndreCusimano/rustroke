@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use rustroke_core::{
     Color, DisplayList, PhysicalSize, Rect, Stroke, Tessellator, TextureAtlas, point, vec2,
 };
-use rustroke_render::{OffscreenRenderer, PaintJob};
+use rustroke_render::{OffscreenRenderer, PaintJob, wgpu};
 use rustroke_text::{Fonts, TextStyle};
 
 /// Max per-channel difference tolerated, to absorb GPU rounding differences.
@@ -622,4 +622,70 @@ fn empty_scene_is_clear_color() {
     for px in pixels.as_chunks::<4>().0 {
         assert_eq!(*px, [30, 30, 46, 255]);
     }
+}
+
+/// INT-01: an application-owned wgpu texture is shown without copies.
+#[test]
+fn native_textures_are_drawn() {
+    use rustroke_core::TextureId;
+    let mut atlas = TextureAtlas::new(64);
+    let Ok(mut renderer) = pollster::block_on(OffscreenRenderer::new(&atlas)) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    // The "application" renders into its own texture; here: a solid color.
+    let size = wgpu::Extent3d {
+        width: 4,
+        height: 4,
+        depth_or_array_layers: 1,
+    };
+    let texture = renderer.device().create_texture(&wgpu::TextureDescriptor {
+        label: Some("app texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let teal = [64u8, 160, 150, 255];
+    renderer.queue().write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &teal.repeat(16),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(16),
+            rows_per_image: Some(4),
+        },
+        size,
+    );
+    let id = TextureId::User(99);
+    renderer.register_native_texture(
+        id,
+        &texture.create_view(&wgpu::TextureViewDescriptor::default()),
+    );
+
+    let mut list = DisplayList::new();
+    list.image(
+        Rect::from_min_size(point(8.0, 8.0), vec2(16.0, 16.0)),
+        id,
+        Color::WHITE,
+    );
+    let meshes = Tessellator::new(1.0, &atlas).tessellate(&list);
+    let job = PaintJob {
+        meshes: &meshes,
+        textures: &rustroke_core::TexturesDelta::default(),
+        pixels_per_point: 1.0,
+        clear_color: Color::BLACK,
+    };
+    let pixels = renderer.render(PhysicalSize::new(32, 32), &job, &mut atlas);
+    let at = |x: usize, y: usize| &pixels[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
+    assert_eq!(at(16, 16), teal, "image center shows the native texture");
+    assert_eq!(at(2, 2), [0, 0, 0, 255], "outside is the clear color");
 }

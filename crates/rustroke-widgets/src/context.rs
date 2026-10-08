@@ -8,7 +8,7 @@ use rustroke_core::{
 };
 use rustroke_text::Fonts;
 
-use crate::accessibility::{self, DescribedWidget, PendingAction, WidgetInfo};
+use crate::accessibility::{self, PendingAction, WidgetDescription, WidgetInfo};
 use crate::{Id, Response, Style, Ui};
 
 /// What a widget reacts to.
@@ -157,8 +157,14 @@ pub struct TextureHandle {
 #[derive(Debug)]
 struct HandleInner {
     id: TextureId,
-    size: [u32; 2],
+    size: Mutex<[u32; 2]>,
+    /// Shared with the [`TextureManager`]: images waiting to be uploaded.
+    pending: Arc<Mutex<Vec<(TextureId, ColorImage)>>>,
     freed: Arc<Mutex<Vec<TextureId>>>,
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Drop for HandleInner {
@@ -178,12 +184,53 @@ impl TextureHandle {
 
     /// Size in pixels.
     pub fn size(&self) -> [u32; 2] {
-        self.inner.size
+        *lock(&self.inner.size)
     }
 
     /// Size in pixels as a vector (one point per pixel).
     pub fn size_vec2(&self) -> Vec2 {
-        Vec2::new(self.inner.size[0] as f32, self.inner.size[1] as f32)
+        let [w, h] = self.size();
+        Vec2::new(w as f32, h as f32)
+    }
+
+    /// Replaces the image, keeping the same id (so shapes and widgets that
+    /// show this texture show the new image from the next frame). The size
+    /// may change.
+    pub fn set(&self, image: ColorImage) {
+        *lock(&self.inner.size) = image.size;
+        lock(&self.inner.pending).push((self.inner.id, image));
+    }
+
+    /// Records a new size without uploading anything (textures whose
+    /// pixels come from elsewhere, e.g. a native GPU texture).
+    pub fn set_size(&self, size: [u32; 2]) {
+        *lock(&self.inner.size) = size;
+    }
+}
+
+/// Wakes the UI up from any thread, e.g. when a background computation
+/// finishes: `handle.request_repaint()` schedules a new frame. Cheap to
+/// clone; get one with [`Context::repaint_handle`].
+#[derive(Clone)]
+pub struct RepaintHandle {
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl std::fmt::Debug for RepaintHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepaintHandle")
+            .field("connected", &self.wake.is_some())
+            .finish()
+    }
+}
+
+impl RepaintHandle {
+    /// Asks for a new frame as soon as possible. Does nothing when the
+    /// context isn't driven by a window (e.g. in tests).
+    pub fn request_repaint(&self) {
+        if let Some(wake) = &self.wake {
+            wake();
+        }
     }
 }
 
@@ -191,8 +238,32 @@ impl TextureHandle {
 #[derive(Debug, Default)]
 struct TextureManager {
     next_id: u64,
-    pending: Vec<(TextureId, ColorImage)>,
+    pending: Arc<Mutex<Vec<(TextureId, ColorImage)>>>,
     freed: Arc<Mutex<Vec<TextureId>>>,
+}
+
+impl TextureManager {
+    fn new_handle(&mut self, size: [u32; 2]) -> TextureHandle {
+        self.next_id += 1;
+        TextureHandle {
+            inner: Arc::new(HandleInner {
+                id: TextureId::User(self.next_id),
+                size: Mutex::new(size),
+                pending: Arc::clone(&self.pending),
+                freed: Arc::clone(&self.freed),
+            }),
+        }
+    }
+}
+
+/// How the platform wakes the event loop up.
+#[derive(Clone)]
+struct RepaintCallback(Option<Arc<dyn Fn() + Send + Sync>>);
+
+impl std::fmt::Debug for RepaintCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RepaintCallback({})", self.0.is_some())
+    }
 }
 
 /// A widget placed in a frame, for hit testing in the next one.
@@ -222,7 +293,7 @@ struct FrameState {
     /// A tooltip-capable widget was hovered this frame.
     hover_tracked: bool,
     /// Widget descriptions for screen readers (only while active).
-    described: Vec<DescribedWidget>,
+    described: Vec<WidgetDescription>,
 }
 
 impl Default for FrameState {
@@ -278,8 +349,11 @@ pub struct Context {
     /// Widget being hovered for tooltip purposes, and since when.
     hover_start: Option<(Id, f64)>,
     textures: TextureManager,
+    repaint_callback: RepaintCallback,
     /// Assistive technology (a screen reader) is listening.
     accessibility_active: bool,
+    /// Widgets described in the last completed frame.
+    last_widgets: Vec<WidgetDescription>,
     /// Requests from assistive technology, applied at the next frame.
     accesskit_requests: Vec<accesskit::ActionRequest>,
     /// Widgets to report as clicked because assistive technology asked.
@@ -303,7 +377,9 @@ impl Default for Context {
             open_popup: None,
             hover_start: None,
             textures: TextureManager::default(),
+            repaint_callback: RepaintCallback(None),
             accessibility_active: false,
+            last_widgets: Vec::new(),
             accesskit_requests: Vec::new(),
             pending_clicks: Vec::new(),
             data: DataMap::default(),
@@ -348,6 +424,18 @@ impl Context {
         self.accessibility_active = active;
     }
 
+    /// The widgets of the last completed frame (after `end_frame`), in the
+    /// order they were added, with role, label, state and rectangle. Handy
+    /// to find widgets by label in tests.
+    pub fn widgets(&self) -> &[WidgetDescription] {
+        &self.last_widgets
+    }
+
+    /// The first widget of the last frame whose label is `label`.
+    pub fn find_widget(&self, label: &str) -> Option<&WidgetDescription> {
+        self.last_widgets.iter().find(|w| w.info.label == label)
+    }
+
     /// True while a screen reader is listening.
     pub fn is_accessibility_active(&self) -> bool {
         self.accessibility_active
@@ -359,13 +447,10 @@ impl Context {
         self.accesskit_requests.push(request);
     }
 
-    /// Records how widget `id` should be presented to screen readers.
+    /// Records what widget `id` is (for screen readers and [`Context::widgets`]).
     pub(crate) fn describe(&mut self, id: Id, info: WidgetInfo, rect: Rect, enabled: bool) {
-        if !self.accessibility_active {
-            return;
-        }
         let focusable = self.this_frame.focusables.contains(&id);
-        self.this_frame.described.push(DescribedWidget {
+        self.this_frame.described.push(WidgetDescription {
             id,
             info,
             rect,
@@ -378,18 +463,30 @@ impl Context {
     /// `DisplayList::image`. Load once and keep the handle: the texture
     /// lives until the last clone of the handle is dropped.
     pub fn load_texture(&mut self, image: ColorImage) -> TextureHandle {
-        let manager = &mut self.textures;
-        manager.next_id += 1;
-        let id = TextureId::User(manager.next_id);
-        let size = image.size;
-        manager.pending.push((id, image));
-        TextureHandle {
-            inner: Arc::new(HandleInner {
-                id,
-                size,
-                freed: Arc::clone(&manager.freed),
-            }),
+        let handle = self.textures.new_handle(image.size);
+        handle.set(image);
+        handle
+    }
+
+    /// A texture id whose pixels are provided by the platform layer rather
+    /// than by an image (e.g. a wgpu texture the application renders into;
+    /// see `Frame::register_native_texture`). Freed when the last clone of
+    /// the handle is dropped, like any other texture.
+    pub fn allocate_texture(&mut self, size: [u32; 2]) -> TextureHandle {
+        self.textures.new_handle(size)
+    }
+
+    /// A handle to wake the UI up from other threads.
+    pub fn repaint_handle(&self) -> RepaintHandle {
+        RepaintHandle {
+            wake: self.repaint_callback.0.clone(),
         }
+    }
+
+    /// Connects [`RepaintHandle`]s to the platform's event loop (called by
+    /// the platform layer once at startup).
+    pub fn set_repaint_callback(&mut self, wake: impl Fn() + Send + Sync + 'static) {
+        self.repaint_callback = RepaintCallback(Some(Arc::new(wake)));
     }
 
     /// State stored for `id` with [`Context::insert_data`], if it has type `T`.
@@ -479,7 +576,7 @@ impl Context {
         }
 
         for request in std::mem::take(&mut self.accesskit_requests) {
-            match accessibility::pending_action(&request, &self.prev_frame.described) {
+            match accessibility::pending_action(&request, &self.last_widgets) {
                 Some(PendingAction::Focus(id)) => {
                     self.focused = Some(id);
                     self.focus_visible = true;
@@ -548,16 +645,11 @@ impl Context {
             ));
         }
         self.pending_clicks.clear();
+        self.last_widgets = std::mem::take(&mut self.this_frame.described);
         let mut output = std::mem::take(&mut self.this_frame.output);
         output.textures = TexturesDelta {
-            set: std::mem::take(&mut self.textures.pending),
-            free: std::mem::take(
-                &mut *self
-                    .textures
-                    .freed
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner),
-            ),
+            set: std::mem::take(&mut *lock(&self.textures.pending)),
+            free: std::mem::take(&mut *lock(&self.textures.freed)),
         };
         for (_, mut list) in layers {
             output.shapes.append(&mut list);
@@ -680,6 +772,14 @@ impl Context {
         {
             self.pending_clicks.remove(i);
             response.clicked = true;
+        }
+
+        let pointer = &self.input.pointer;
+        if response.hovered {
+            response.hover_pos = pointer.pos();
+        }
+        if response.pressed || response.clicked || response.drag_started || response.drag_stopped {
+            response.interact_pos = pointer.pos().or(pointer.interact_pos());
         }
 
         response.has_focus = self.focused == Some(id);

@@ -92,14 +92,20 @@ impl WidgetInfo {
     }
 }
 
-/// A described widget collected during a frame.
-#[derive(Clone, Debug)]
-pub(crate) struct DescribedWidget {
-    pub(crate) id: Id,
-    pub(crate) info: WidgetInfo,
-    pub(crate) rect: Rect,
-    pub(crate) enabled: bool,
-    pub(crate) focusable: bool,
+/// A widget placed in a frame, with what it is and where: see
+/// `Context::widgets`. Useful to find widgets in tests.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WidgetDescription {
+    /// The widget's id.
+    pub id: Id,
+    /// Role, label and state.
+    pub info: WidgetInfo,
+    /// Where it is, in points.
+    pub rect: Rect,
+    /// False if it was disabled.
+    pub enabled: bool,
+    /// Whether it can take keyboard focus.
+    pub focusable: bool,
 }
 
 /// Node id of the root (the whole window).
@@ -114,7 +120,7 @@ pub(crate) fn node_id(id: Id) -> NodeId {
 /// widget in the order they were added. Coordinates are scaled from
 /// points to physical pixels by the root's transform.
 pub(crate) fn build_tree(
-    widgets: &[DescribedWidget],
+    widgets: &[WidgetDescription],
     focused: Option<Id>,
     screen: Rect,
     pixels_per_point: f32,
@@ -140,7 +146,7 @@ pub(crate) fn build_tree(
     }
 }
 
-fn widget_node(w: &DescribedWidget) -> Node {
+fn widget_node(w: &WidgetDescription) -> Node {
     let info = &w.info;
     let role = match info.role {
         WidgetRole::Label => Role::Label,
@@ -206,7 +212,7 @@ pub(crate) enum PendingAction {
 /// Converts an AccessKit request into an action on one of `widgets`.
 pub(crate) fn pending_action(
     request: &accesskit::ActionRequest,
-    widgets: &[DescribedWidget],
+    widgets: &[WidgetDescription],
 ) -> Option<PendingAction> {
     let target = widgets
         .iter()

@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-08
+
+### Added
+
+- **Native GPU textures**: `Frame::wgpu()` gives rustroke's `Device` and
+  `Queue`; `Frame::register_native_texture(view, size)` shows an
+  application-owned wgpu texture as an image without copying it
+  (`Frame::update_native_texture` after recreating it). `rustroke::wgpu`
+  re-exports the matching wgpu version.
+- **Wake-ups from other threads**: `Context::repaint_handle()` /
+  `Frame::repaint_handle()` return a `RepaintHandle` (`Clone + Send + Sync`)
+  whose `request_repaint()` schedules a frame.
+- `TextureHandle::set(image)` replaces a texture's image in place, keeping
+  its id.
+- **Testing kit**: `rustroke::testing::Harness` runs an `App` without a
+  window: `click(app, label)`, `type_text`, `key`, `widgets()`, `find`,
+  `title()`, `shapes()`.
+- `Context::widgets()` / `find_widget(label)`: role, label, state and
+  rectangle of every widget of the last frame, without enabling
+  accessibility.
+- `accessible_label(..)` on `Button`, `Checkbox`, `RadioButton`, `Slider`
+  and `TextEdit`, for widgets without visible text.
+- `Response::hover_pos()` and `Response::interact_pointer_pos()`.
+- `InputState::consume_scroll()` and `Ui::input_mut()`, so a widget can keep
+  the mouse wheel from scrolling its parent.
+- `POINTS_PER_SCROLL_LINE`: points per mouse wheel notch.
+- `Frame::set_title(..)` and `App::on_close_requested()`.
+- Semantic theme colors: `Visuals::success`, `warning`, `error`, `info`.
+- `Color::from_srgb8` / `from_srgba8` are `const fn`, for `const` colors.
+- `RawInput`, `Event`, `ImeEvent`, `FrameOutput`, `TexturesDelta` and
+  `WidgetDescription` are re-exported by `rustroke`.
+
 ## [0.1.1] — 2026-10-08
 
 ### Fixed
@@ -57,6 +89,7 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/AndreCusimano/rustroke/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/AndreCusimano/rustroke/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/AndreCusimano/rustroke/releases/tag/v0.1.0

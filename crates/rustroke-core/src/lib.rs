@@ -16,7 +16,9 @@ pub use color::Color;
 pub use display_list::{ClippedShape, DisplayList};
 pub use galley::{Galley, GalleyRow, GlyphQuad};
 pub use geometry::{PhysicalSize, Point, Rect, Vec2, point, vec2};
-pub use input::{Event, ImeEvent, InputState, Key, Modifiers, PointerButton, RawInput};
+pub use input::{
+    Event, ImeEvent, InputState, Key, Modifiers, POINTS_PER_SCROLL_LINE, PointerButton, RawInput,
+};
 pub use shape::{Shape, Stroke};
 pub use tessellator::{ClippedMesh, Mesh, Tessellator, Vertex};
 pub use texture::{ColorImage, TextureId, TexturesDelta};

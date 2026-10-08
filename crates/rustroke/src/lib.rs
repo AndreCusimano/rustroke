@@ -82,6 +82,16 @@
 //! - **Accessibility**: widgets are exposed to screen readers (VoiceOver,
 //!   Narrator, Orca) through AccessKit. Custom widgets can describe
 //!   themselves with [`Ui::describe`].
+//! - **Your own GPU rendering** (e.g. a 3D viewport): get rustroke's device
+//!   and queue with [`Frame::wgpu`], render into your texture and show it
+//!   with [`Frame::register_native_texture`] — no copies.
+//! - **Background work**: [`Frame::repaint_handle`] gives a
+//!   [`RepaintHandle`] that wakes the UI up from any thread.
+//! - **Window**: [`Frame::set_title`]; [`App::on_close_requested`] can keep
+//!   the window open (e.g. to ask about unsaved changes).
+//! - **Testing**: [`testing::Harness`] runs your app without a window;
+//!   click widgets by label, type text, press keys, inspect
+//!   [`Context::widgets`].
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `layout`, `containers`,
@@ -95,18 +105,19 @@
 //! API) and `rustroke-winit` (window and event loop).
 
 pub use rustroke_core::{
-    Color, ColorImage, DisplayList, Galley, InputState, Key, Modifiers, Point, PointerButton, Rect,
-    Shape, Stroke, TextureId, Vec2, point, vec2,
+    Color, ColorImage, DisplayList, Event, Galley, ImeEvent, InputState, Key, Modifiers,
+    POINTS_PER_SCROLL_LINE, Point, PointerButton, RawInput, Rect, Shape, Stroke, TextureId,
+    TexturesDelta, Vec2, point, vec2,
 };
 pub use rustroke_text::{FontFamily, Fonts, TextStyle};
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
-    Align, Button, CentralPanel, Checkbox, Context, CursorIcon, Direction, Grid, Id, InnerResponse,
-    Label, LayerId, Layout, Numeric, Order, Panel, PanelSide, RadioButton, Response, ScrollArea,
-    Sense, Separator, Slider, Style, TextEdit, TextureHandle, Ui, UiRoot, Visuals, Widget,
-    WidgetInfo, WidgetRole, Window,
+    Align, Button, CentralPanel, Checkbox, Context, CursorIcon, Direction, FrameOutput, Grid, Id,
+    InnerResponse, Label, LayerId, Layout, Numeric, Order, Panel, PanelSide, RadioButton,
+    RepaintHandle, Response, ScrollArea, Sense, Separator, Slider, Style, TextEdit, TextureHandle,
+    Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
 };
-pub use rustroke_winit::{App, Frame, RunError, WindowOptions, run};
+pub use rustroke_winit::{App, Frame, RunError, WindowOptions, run, testing, wgpu};
 
 /// Decodes a PNG or JPEG file (already read into memory) into an image
 /// that can be uploaded with `Context::load_texture`.

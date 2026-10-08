@@ -56,6 +56,7 @@ pub struct TextEdit<'t> {
     hint: String,
     desired_width: Option<f32>,
     desired_rows: usize,
+    accessible_label: Option<String>,
 }
 
 impl<'t> TextEdit<'t> {
@@ -67,6 +68,7 @@ impl<'t> TextEdit<'t> {
             hint: String::new(),
             desired_width: None,
             desired_rows: 1,
+            accessible_label: None,
         }
     }
 
@@ -77,6 +79,13 @@ impl<'t> TextEdit<'t> {
             desired_rows: 4,
             ..Self::singleline(text)
         }
+    }
+
+    /// The name screen readers announce (and tests find the widget by),
+    /// instead of the visible text. Useful when the text is empty.
+    pub fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
     }
 
     /// Shown in a weak color while the field is empty and not focused.
@@ -136,7 +145,13 @@ impl Widget for TextEdit<'_> {
         };
         ui.describe(
             &response,
-            WidgetInfo::new(role, self.hint.clone()).value(self.text.clone()),
+            WidgetInfo::new(
+                role,
+                self.accessible_label
+                    .clone()
+                    .unwrap_or_else(|| self.hint.clone()),
+            )
+            .value(self.text.clone()),
         );
         if response.hovered() || response.dragged() {
             ui.ctx().set_cursor(CursorIcon::Text);

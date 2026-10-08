@@ -1,6 +1,7 @@
 //! Desktop integration: window creation and the event loop, built on winit.
 
 mod input;
+pub mod testing;
 
 use std::fmt;
 use std::sync::Arc;
@@ -11,8 +12,14 @@ use rustroke_core::{
     Color, DisplayList, Galley, InputState, PhysicalSize, Point, RawInput, Rect, Tessellator, point,
 };
 use rustroke_render::{PaintJob, RenderOutcome, Renderer, RendererError};
+
+/// The wgpu version rustroke uses (for [`Frame::wgpu`] and native textures):
+/// use these types so the application and rustroke share one GPU device.
+pub use rustroke_render::wgpu;
 use rustroke_text::{Fonts, TextStyle};
-use rustroke_widgets::{CentralPanel, Context, CursorIcon, Ui, UiRoot};
+use rustroke_widgets::{
+    CentralPanel, Context, CursorIcon, RepaintHandle, TextureHandle, Ui, UiRoot,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
@@ -54,9 +61,71 @@ pub struct Frame<'a> {
     pub request_repaint: bool,
     fonts: &'a mut Fonts,
     ctx: &'a mut Context,
+    /// The GPU renderer; `None` when the frame isn't drawn to a window
+    /// (e.g. in tests).
+    renderer: Option<&'a mut Renderer>,
+    /// A new window title requested this frame.
+    title: Option<String>,
 }
 
 impl Frame<'_> {
+    /// Changes the window title (e.g. the document name, with `*` when
+    /// there are unsaved changes). Cheap to call every frame: the window is
+    /// only updated when the title changes.
+    pub fn set_title(&mut self, title: impl Into<String>) {
+        self.title = Some(title.into());
+    }
+
+    /// The GPU device and queue rustroke draws with, to render into the
+    /// application's own textures (e.g. a 3D viewport) and show them with
+    /// [`Frame::register_native_texture`]. `None` without a window.
+    ///
+    /// Submit the application's command buffers to this queue during
+    /// `update`: they run before the UI is drawn, so the result is visible
+    /// in the same frame.
+    pub fn wgpu(&self) -> Option<(&wgpu::Device, &wgpu::Queue)> {
+        self.renderer.as_deref().map(|r| (r.device(), r.queue()))
+    }
+
+    /// Shows an application-owned wgpu texture as an image, without copying
+    /// it. Returns a handle for [`rustroke_widgets::Image`] or
+    /// `DisplayList::image`; the texture is released (by rustroke) when the
+    /// last clone of the handle is dropped. `None` without a window.
+    ///
+    /// The view must be a filterable float 2D texture (e.g.
+    /// `Rgba8UnormSrgb`, usage `TEXTURE_BINDING`); its colors are read as
+    /// linear with premultiplied alpha. When the application recreates the
+    /// texture (e.g. on resize), call [`Frame::update_native_texture`].
+    pub fn register_native_texture(
+        &mut self,
+        view: &wgpu::TextureView,
+        size: [u32; 2],
+    ) -> Option<TextureHandle> {
+        let renderer = self.renderer.as_deref_mut()?;
+        let handle = self.ctx.allocate_texture(size);
+        renderer.register_native_texture(handle.id(), view);
+        Some(handle)
+    }
+
+    /// Points an existing native texture handle to a new view (and size).
+    pub fn update_native_texture(
+        &mut self,
+        handle: &TextureHandle,
+        view: &wgpu::TextureView,
+        size: [u32; 2],
+    ) {
+        if let Some(renderer) = self.renderer.as_deref_mut() {
+            renderer.register_native_texture(handle.id(), view);
+            handle.set_size(size);
+        }
+    }
+
+    /// A handle to wake the UI up from other threads (e.g. when a
+    /// background computation finishes).
+    pub fn repaint_handle(&self) -> RepaintHandle {
+        self.ctx.repaint_handle()
+    }
+
     /// Lays out and draws widgets in the space not taken by panels (the
     /// central panel), minus the style's window margin. Show panels
     /// (`Panel::top(..).show(frame, ..)`) before calling this. Widgets are
@@ -130,6 +199,13 @@ pub trait App {
     /// Called once per frame. The window only redraws when something
     /// happened (input, resize, ...), so idle apps use no CPU.
     fn update(&mut self, frame: &mut Frame<'_>);
+
+    /// The user asked to close the window. Return `false` to keep it open
+    /// (e.g. to ask whether to save first, then close by returning `true`
+    /// on a later request). Default: close.
+    fn on_close_requested(&mut self) -> bool {
+        true
+    }
 }
 
 /// Any closure taking the frame is an app, for small programs:
@@ -174,6 +250,8 @@ impl std::error::Error for RunError {}
 enum UserEvent {
     /// From the accessibility adapter (screen reader requests).
     AccessKit(accesskit_winit::Event),
+    /// A `RepaintHandle` asked for a frame.
+    Repaint,
 }
 
 impl From<accesskit_winit::Event> for UserEvent {
@@ -189,13 +267,22 @@ pub fn run(options: WindowOptions, app: impl App) -> Result<(), RunError> {
         .map_err(RunError::EventLoop)?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
+    let mut ctx = Context::new();
+    let wake = std::sync::Mutex::new(proxy.clone());
+    ctx.set_repaint_callback(move || {
+        let proxy = wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Fails only if the event loop has already exited.
+        let _ = proxy.send_event(UserEvent::Repaint);
+    });
     let mut runner = Runner {
         options,
         app,
         start: Instant::now(),
         clear_color: Color::BLACK,
         fonts: Fonts::new(),
-        ctx: Context::new(),
+        ctx,
         input: InputCollector::default(),
         cursor: CursorIcon::Default,
         repaint_at: None,
@@ -300,14 +387,23 @@ impl<A: App> Runner<A> {
             request_repaint: false,
             fonts: &mut self.fonts,
             ctx: &mut self.ctx,
+            renderer: Some(&mut state.renderer),
+            title: None,
         };
         self.app.update(&mut frame);
         let Frame {
             shapes,
             clear_color,
             request_repaint,
+            title,
             ..
         } = frame;
+        if let Some(title) = title
+            && title != self.options.title
+        {
+            state.window.set_title(&title);
+            self.options.title = title;
+        }
         self.clear_color = clear_color;
         self.fonts.end_frame();
         let mut output = self.ctx.end_frame();
@@ -356,7 +452,15 @@ impl<A: App> Runner<A> {
 
 impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
-        let UserEvent::AccessKit(event) = event;
+        let event = match event {
+            UserEvent::AccessKit(event) => event,
+            UserEvent::Repaint => {
+                if let Some(state) = &self.state {
+                    state.window.request_redraw();
+                }
+                return;
+            }
+        };
         match event.window_event {
             accesskit_winit::WindowEvent::InitialTreeRequested => {
                 self.ctx.set_accessibility_active(true);
@@ -408,7 +512,14 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
             state.accesskit.process_event(&state.window, &event);
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                if self.app.on_close_requested() {
+                    event_loop.exit();
+                } else if let Some(state) = &self.state {
+                    // The app may show a "save changes?" dialog now.
+                    state.window.request_redraw();
+                }
+            }
             WindowEvent::Resized(size) => {
                 if let Some(state) = &mut self.state {
                     state.renderer.resize(to_physical(size));

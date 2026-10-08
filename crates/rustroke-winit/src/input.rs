@@ -1,12 +1,11 @@
 //! Conversion of winit events into platform-independent [`Event`]s.
 
-use rustroke_core::{Event, ImeEvent, Key, Modifiers, Point, PointerButton, Vec2};
+use rustroke_core::{
+    Event, ImeEvent, Key, Modifiers, POINTS_PER_SCROLL_LINE, Point, PointerButton, Vec2,
+};
 use rustroke_widgets::CursorIcon;
 use winit::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
-
-/// Points scrolled per wheel "line".
-const POINTS_PER_SCROLL_LINE: f32 = 50.0;
 
 /// Accumulates events between frames.
 #[derive(Default)]

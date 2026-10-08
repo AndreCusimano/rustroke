@@ -27,9 +27,11 @@ mod text_edit;
 mod ui;
 pub mod widgets;
 
-pub use accessibility::{NumericInfo, WidgetInfo, WidgetRole};
+pub use accessibility::{NumericInfo, WidgetDescription, WidgetInfo, WidgetRole};
 pub use containers::{CentralPanel, Panel, PanelSide, ScrollArea, UiRoot, Window};
-pub use context::{Context, CursorIcon, FrameOutput, LayerId, Order, Sense, TextureHandle};
+pub use context::{
+    Context, CursorIcon, FrameOutput, LayerId, Order, RepaintHandle, Sense, TextureHandle,
+};
 pub use grid::Grid;
 pub use id::Id;
 pub use layout::{Align, Direction, Layout};

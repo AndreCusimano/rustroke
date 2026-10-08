@@ -160,6 +160,12 @@ impl<'a> Ui<'a> {
         self.ctx.input()
     }
 
+    /// Mutable input, e.g. [`InputState::consume_scroll`] or
+    /// [`InputState::consume_key`].
+    pub fn input_mut(&mut self) -> &mut InputState {
+        self.ctx.input_mut()
+    }
+
     /// This Ui's id; widget ids are derived from it.
     pub fn id(&self) -> Id {
         self.id

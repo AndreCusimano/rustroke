@@ -26,8 +26,17 @@ pub struct Painter {
 /// A texture on the GPU and the bind group that samples it.
 #[derive(Debug)]
 struct GpuTexture {
-    texture: wgpu::Texture,
+    /// `None` for native textures, which the application owns.
+    texture: Option<wgpu::Texture>,
     bind_group: wgpu::BindGroup,
+}
+
+impl GpuTexture {
+    fn owned(&self) -> &wgpu::Texture {
+        self.texture
+            .as_ref()
+            .expect("the atlas is always owned by the painter")
+    }
 }
 
 /// Everything needed to draw one frame.
@@ -153,14 +162,14 @@ impl Painter {
             device,
             &bind_group_layout,
             &uniform_buffer,
-            &atlas_texture,
+            &atlas_texture.create_view(&wgpu::TextureViewDescriptor::default()),
             &sampler,
         );
         let mut textures = HashMap::new();
         textures.insert(
             TextureId::Atlas,
             GpuTexture {
-                texture: atlas_texture,
+                texture: Some(atlas_texture),
                 bind_group,
             },
         );
@@ -196,17 +205,17 @@ impl Painter {
         atlas: &mut TextureAtlas,
     ) {
         let size = atlas.size();
-        if self.textures[&TextureId::Atlas].texture.width() != size {
+        if self.textures[&TextureId::Atlas].owned().width() != size {
             let texture = create_texture(device, "rustroke atlas", size, size);
             self.insert_texture(device, TextureId::Atlas, texture);
             // New texture: everything must be uploaded.
             atlas.take_dirty();
-            let texture = &self.textures[&TextureId::Atlas].texture;
+            let texture = self.textures[&TextureId::Atlas].owned();
             upload_atlas_region(queue, texture, atlas, 0, 0, size, size);
             return;
         }
         if let Some(r) = atlas.take_dirty() {
-            let texture = &self.textures[&TextureId::Atlas].texture;
+            let texture = self.textures[&TextureId::Atlas].owned();
             upload_atlas_region(queue, texture, atlas, r.x, r.y, r.width, r.height);
         }
     }
@@ -258,17 +267,45 @@ impl Painter {
     }
 
     fn insert_texture(&mut self, device: &wgpu::Device, id: TextureId, texture: wgpu::Texture) {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = create_bind_group(
             device,
             &self.bind_group_layout,
             &self.uniform_buffer,
-            &texture,
+            &view,
             &self.sampler,
         );
         self.textures.insert(
             id,
             GpuTexture {
-                texture,
+                texture: Some(texture),
+                bind_group,
+            },
+        );
+    }
+
+    /// Draws meshes using texture `id` from `view`, a texture owned by the
+    /// application (no copy is made). Call again with a new view when the
+    /// application recreates its texture. The view must be a filterable
+    /// float 2D texture (e.g. `Rgba8UnormSrgb`); colors are read as linear
+    /// with premultiplied alpha, like the rest of the UI.
+    pub fn set_native_texture(
+        &mut self,
+        device: &wgpu::Device,
+        id: TextureId,
+        view: &wgpu::TextureView,
+    ) {
+        let bind_group = create_bind_group(
+            device,
+            &self.bind_group_layout,
+            &self.uniform_buffer,
+            view,
+            &self.sampler,
+        );
+        self.textures.insert(
+            id,
+            GpuTexture {
+                texture: None,
                 bind_group,
             },
         );
@@ -434,10 +471,9 @@ fn create_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     uniforms: &wgpu::Buffer,
-    atlas: &wgpu::Texture,
+    view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
 ) -> wgpu::BindGroup {
-    let view = atlas.create_view(&wgpu::TextureViewDescriptor::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("rustroke bind group"),
         layout,
@@ -448,7 +484,7 @@ fn create_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(&view),
+                resource: wgpu::BindingResource::TextureView(view),
             },
             wgpu::BindGroupEntry {
                 binding: 2,

@@ -94,6 +94,7 @@ impl Widget for Label {
 pub struct Button {
     text: String,
     frame: bool,
+    accessible_label: Option<String>,
 }
 
 impl Button {
@@ -102,7 +103,15 @@ impl Button {
         Self {
             text: text.into(),
             frame: true,
+            accessible_label: None,
         }
+    }
+
+    /// The name screen readers announce (and tests find the widget by),
+    /// instead of the visible text. Useful when the text is empty.
+    pub fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
     }
 
     /// Without a frame the button only shows a background while hovered
@@ -137,7 +146,12 @@ impl Widget for Button {
         let response = ui.interact(id, rect, Sense::CLICK);
         ui.describe(
             &response,
-            WidgetInfo::new(WidgetRole::Button, self.text.clone()),
+            WidgetInfo::new(
+                WidgetRole::Button,
+                self.accessible_label
+                    .clone()
+                    .unwrap_or_else(|| self.text.clone()),
+            ),
         );
         if response.clicked() && menu_width.is_some() {
             ui.close_menu();
@@ -171,6 +185,7 @@ impl Widget for Button {
 pub struct Checkbox<'a> {
     checked: &'a mut bool,
     text: String,
+    accessible_label: Option<String>,
 }
 
 impl<'a> Checkbox<'a> {
@@ -179,7 +194,15 @@ impl<'a> Checkbox<'a> {
         Self {
             checked,
             text: text.into(),
+            accessible_label: None,
         }
+    }
+
+    /// The name screen readers announce (and tests find the widget by),
+    /// instead of the visible text. Useful when the text is empty.
+    pub fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
     }
 }
 
@@ -199,7 +222,13 @@ impl Widget for Checkbox<'_> {
         }
         ui.describe(
             &response,
-            WidgetInfo::new(WidgetRole::Checkbox, self.text.clone()).toggled(*self.checked),
+            WidgetInfo::new(
+                WidgetRole::Checkbox,
+                self.accessible_label
+                    .clone()
+                    .unwrap_or_else(|| self.text.clone()),
+            )
+            .toggled(*self.checked),
         );
 
         let rect = response.rect;
@@ -245,6 +274,7 @@ impl Widget for Checkbox<'_> {
 pub struct RadioButton {
     selected: bool,
     text: String,
+    accessible_label: Option<String>,
 }
 
 impl RadioButton {
@@ -253,7 +283,15 @@ impl RadioButton {
         Self {
             selected,
             text: text.into(),
+            accessible_label: None,
         }
+    }
+
+    /// The name screen readers announce (and tests find the widget by),
+    /// instead of the visible text. Useful when the text is empty.
+    pub fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
     }
 }
 
@@ -269,7 +307,13 @@ impl Widget for RadioButton {
         let response = ui.allocate_response(size, Sense::CLICK);
         ui.describe(
             &response,
-            WidgetInfo::new(WidgetRole::RadioButton, self.text.clone()).toggled(self.selected),
+            WidgetInfo::new(
+                WidgetRole::RadioButton,
+                self.accessible_label
+                    .clone()
+                    .unwrap_or_else(|| self.text.clone()),
+            )
+            .toggled(self.selected),
         );
 
         let rect = response.rect;
@@ -338,6 +382,7 @@ pub struct Slider<'a, T: Numeric> {
     text: Option<String>,
     step: Option<f64>,
     show_value: bool,
+    accessible_label: Option<String>,
 }
 
 impl<'a, T: Numeric> Slider<'a, T> {
@@ -349,7 +394,15 @@ impl<'a, T: Numeric> Slider<'a, T> {
             text: None,
             step: None,
             show_value: true,
+            accessible_label: None,
         }
+    }
+
+    /// The name screen readers announce (and tests find the widget by),
+    /// instead of the visible text. Useful when the text is empty.
+    pub fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
     }
 
     /// A label shown after the value.
@@ -494,14 +547,19 @@ impl<T: Numeric> Widget for Slider<'_, T> {
         let value = self.value.to_f64();
         ui.describe(
             &response,
-            WidgetInfo::new(WidgetRole::Slider, self.text.clone().unwrap_or_default()).numeric(
-                NumericInfo {
-                    value,
-                    min,
-                    max,
-                    step: self.effective_step(),
-                },
-            ),
+            WidgetInfo::new(
+                WidgetRole::Slider,
+                self.accessible_label
+                    .clone()
+                    .or_else(|| self.text.clone())
+                    .unwrap_or_default(),
+            )
+            .numeric(NumericInfo {
+                value,
+                min,
+                max,
+                step: self.effective_step(),
+            }),
         );
 
         if response.dragged() {

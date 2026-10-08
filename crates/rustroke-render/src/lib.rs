@@ -14,6 +14,8 @@ use wgpu::wgt::WgpuHasDisplayHandle;
 
 pub use offscreen::OffscreenRenderer;
 pub use painter::{PaintJob, Painter};
+/// The wgpu version rustroke uses, so applications use the same types.
+pub use wgpu;
 
 /// Errors that can occur while creating a renderer.
 #[derive(Debug)]
@@ -103,6 +105,28 @@ impl Renderer {
             queue,
             painter,
         })
+    }
+
+    /// The GPU device, e.g. to create textures the application renders
+    /// into and shows with [`Renderer::register_native_texture`].
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// The queue rustroke submits its work on. Submit the application's
+    /// own rendering here before the frame is drawn so it is visible in it.
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Shows the application's texture `view` wherever texture `id` is
+    /// used (no copy). See [`Painter::set_native_texture`].
+    pub fn register_native_texture(
+        &mut self,
+        id: rustroke_core::TextureId,
+        view: &wgpu::TextureView,
+    ) {
+        self.painter.set_native_texture(&self.device, id, view);
     }
 
     /// Current surface size in physical pixels.

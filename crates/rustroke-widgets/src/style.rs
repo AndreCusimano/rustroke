@@ -117,6 +117,14 @@ pub struct Visuals {
     pub selection: Color,
     /// Keyboard focus indicator.
     pub focus: Color,
+    /// Something went well (done, valid, computed).
+    pub success: Color,
+    /// Needs attention (outdated, unsaved, suspicious).
+    pub warning: Color,
+    /// Something failed.
+    pub error: Color,
+    /// Neutral information (hints, in-progress states).
+    pub info: Color,
     /// Background of every other row in striped grids.
     pub stripe: Color,
     /// Opacity of disabled widgets (0 = invisible, 1 = like enabled ones).
@@ -177,6 +185,10 @@ impl Visuals {
             on_accent: rgb(30, 30, 46),
             selection: accent.with_alpha(0.35),
             focus: rgb(249, 226, 175),
+            success: rgb(166, 227, 161),
+            warning: rgb(249, 226, 175),
+            error: rgb(243, 139, 168),
+            info: rgb(137, 220, 235),
             stripe: rgb(49, 50, 68).with_alpha(0.5),
             disabled_alpha: 0.4,
             handle_fill: text,
@@ -221,6 +233,10 @@ impl Visuals {
             on_accent: rgb(255, 255, 255),
             selection: accent.with_alpha(0.25),
             focus: rgb(223, 142, 29),
+            success: rgb(64, 160, 43),
+            warning: rgb(223, 142, 29),
+            error: rgb(210, 15, 57),
+            info: rgb(4, 165, 229),
             stripe: rgb(220, 224, 232).with_alpha(0.6),
             disabled_alpha: 0.45,
             handle_fill: rgb(255, 255, 255),

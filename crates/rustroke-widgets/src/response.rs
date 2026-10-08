@@ -1,4 +1,4 @@
-use rustroke_core::{Rect, Vec2};
+use rustroke_core::{Point, Rect, Vec2};
 
 use crate::Id;
 
@@ -21,6 +21,8 @@ pub struct Response {
     pub(crate) has_focus: bool,
     pub(crate) focus_visible: bool,
     pub(crate) lost_focus: bool,
+    pub(crate) hover_pos: Option<Point>,
+    pub(crate) interact_pos: Option<Point>,
 }
 
 impl Response {
@@ -39,6 +41,8 @@ impl Response {
             has_focus: false,
             focus_visible: false,
             lost_focus: false,
+            hover_pos: None,
+            interact_pos: None,
         }
     }
 
@@ -90,6 +94,18 @@ impl Response {
     /// Has keyboard focus.
     pub fn has_focus(&self) -> bool {
         self.has_focus
+    }
+
+    /// Where the pointer is, in window coordinates (points), while it
+    /// hovers the widget. Subtract `rect.min` for a position inside it.
+    pub fn hover_pos(&self) -> Option<Point> {
+        self.hover_pos
+    }
+
+    /// Where the pointer is while the widget is pressed or dragged (also
+    /// when it has left the widget), or where it was clicked.
+    pub fn interact_pointer_pos(&self) -> Option<Point> {
+        self.interact_pos
     }
 
     /// The widget gave up focus this frame (e.g. Enter in a single-line

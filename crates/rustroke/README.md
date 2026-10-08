@@ -97,6 +97,10 @@ fn main() -> Result<(), rustroke::RunError> {
 - **Accessibility**: screen readers (VoiceOver, Narrator, Orca) through
   AccessKit.
 - **Keyboard**: Tab navigation, Enter/Space activation, arrow keys on sliders.
+- **Your own GPU rendering**: render a 3D viewport (or anything) with wgpu
+  into your own texture and show it in the UI without copies.
+- **Testing**: run your app without a window, click widgets by label, type
+  text and check the result (`rustroke::testing::Harness`).
 
 Desktop: macOS, Windows, Linux. Minimum Rust version: 1.89.
 

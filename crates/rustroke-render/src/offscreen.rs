@@ -28,6 +28,25 @@ impl OffscreenRenderer {
         })
     }
 
+    /// The GPU device (see [`crate::Renderer::device`]).
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// The GPU queue (see [`crate::Renderer::queue`]).
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// See [`crate::Renderer::register_native_texture`].
+    pub fn register_native_texture(
+        &mut self,
+        id: rustroke_core::TextureId,
+        view: &wgpu::TextureView,
+    ) {
+        self.painter.set_native_texture(&self.device, id, view);
+    }
+
     /// Draws `job` into a `size` image and returns its pixels as tightly
     /// packed sRGB RGBA8 rows (premultiplied alpha).
     pub fn render(

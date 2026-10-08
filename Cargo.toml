@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -13,11 +13,11 @@ categories = ["gui", "graphics", "rendering"]
 repository = "https://github.com/AndreCusimano/rustroke"
 
 [workspace.dependencies]
-rustroke-core = { path = "crates/rustroke-core", version = "0.1.1" }
-rustroke-render = { path = "crates/rustroke-render", version = "0.1.1" }
-rustroke-text = { path = "crates/rustroke-text", version = "0.1.1" }
-rustroke-widgets = { path = "crates/rustroke-widgets", version = "0.1.1" }
-rustroke-winit = { path = "crates/rustroke-winit", version = "0.1.1" }
+rustroke-core = { path = "crates/rustroke-core", version = "0.2.0" }
+rustroke-render = { path = "crates/rustroke-render", version = "0.2.0" }
+rustroke-text = { path = "crates/rustroke-text", version = "0.2.0" }
+rustroke-widgets = { path = "crates/rustroke-widgets", version = "0.2.0" }
+rustroke-winit = { path = "crates/rustroke-winit", version = "0.2.0" }
 
 wgpu = "30"
 winit = "0.30.13"
