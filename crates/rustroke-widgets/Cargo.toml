@@ -1,0 +1,19 @@
+[package]
+name = "rustroke-widgets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Immediate-mode API: Context, Ui, layout, widgets, containers, accessibility."
+
+[lints]
+workspace = true
+
+[dependencies]
+rustroke-core.workspace = true
+rustroke-text.workspace = true
+accesskit.workspace = true

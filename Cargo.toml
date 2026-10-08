@@ -1,0 +1,41 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+authors = ["André Cusimano"]
+keywords = ["gui", "immediate-mode", "ui", "widgets", "wgpu"]
+categories = ["gui", "graphics", "rendering"]
+repository = "https://github.com/AndreCusimano/rustroke"
+
+[workspace.dependencies]
+rustroke-core = { path = "crates/rustroke-core", version = "0.1.0" }
+rustroke-render = { path = "crates/rustroke-render", version = "0.1.0" }
+rustroke-text = { path = "crates/rustroke-text", version = "0.1.0" }
+rustroke-widgets = { path = "crates/rustroke-widgets", version = "0.1.0" }
+rustroke-winit = { path = "crates/rustroke-winit", version = "0.1.0" }
+
+wgpu = "30"
+winit = "0.30.13"
+pollster = "1"
+bytemuck = "1.25"
+png = "0.18"
+cosmic-text = "0.19"
+arboard = { version = "3.6", default-features = false }
+accesskit = "0.25"
+accesskit_winit = "0.34"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+log = "0.4"
+env_logger = "0.11"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

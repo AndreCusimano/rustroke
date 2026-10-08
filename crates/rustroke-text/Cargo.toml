@@ -1,0 +1,19 @@
+[package]
+name = "rustroke-text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Text layout and glyph rasterization (cosmic-text) with a glyph atlas."
+
+[lints]
+workspace = true
+
+[dependencies]
+rustroke-core.workspace = true
+cosmic-text.workspace = true
+log.workspace = true

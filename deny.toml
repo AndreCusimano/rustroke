@@ -1,0 +1,42 @@
+# cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
+# Only permissive licenses are accepted for dependencies, so the library can
+# be released under any license the author chooses.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # ttf-parser is unmaintained; it is only pulled in by winit's Wayland
+    # client-side decorations (sctk-adwaita). Revisit when updating winit.
+    "RUSTSEC-2026-0192",
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    # Boost: permissive, no attribution needed in binaries (clipboard on Windows).
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+]
+
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

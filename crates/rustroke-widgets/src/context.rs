@@ -1,0 +1,837 @@
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use rustroke_core::{
+    ColorImage, DisplayList, InputState, Key, Modifiers, Point, PointerButton, RawInput, Rect,
+    TextureId, TexturesDelta, Vec2,
+};
+use rustroke_text::Fonts;
+
+use crate::accessibility::{self, DescribedWidget, PendingAction, WidgetInfo};
+use crate::{Id, Response, Style, Ui};
+
+/// What a widget reacts to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sense {
+    /// Reacts to clicks.
+    pub click: bool,
+    /// Reacts to drags.
+    pub drag: bool,
+    /// Can receive keyboard focus (Tab).
+    pub focusable: bool,
+    /// Enter/Space click the widget while it has focus.
+    pub activate_with_keys: bool,
+}
+
+impl Sense {
+    /// Only reports hovering; doesn't block widgets below it.
+    pub const HOVER: Self = Self {
+        click: false,
+        drag: false,
+        focusable: false,
+        activate_with_keys: false,
+    };
+    /// Clickable and focusable (buttons, checkboxes).
+    pub const CLICK: Self = Self {
+        click: true,
+        drag: false,
+        focusable: true,
+        activate_with_keys: true,
+    };
+    /// Clickable, draggable and focusable (sliders).
+    pub const DRAG: Self = Self {
+        click: true,
+        drag: true,
+        focusable: true,
+        activate_with_keys: true,
+    };
+    /// Text fields: focusable and draggable (to select), but Enter and
+    /// Space are text input, not clicks.
+    pub const TEXT: Self = Self {
+        click: true,
+        drag: true,
+        focusable: true,
+        activate_with_keys: false,
+    };
+    /// Clicks and drags with the pointer, but not reachable with Tab
+    /// (backgrounds, title bars, resize handles, scroll bars).
+    pub const POINTER_DRAG: Self = Self {
+        click: true,
+        drag: true,
+        focusable: false,
+        activate_with_keys: false,
+    };
+
+    fn interactive(self) -> bool {
+        self.click || self.drag
+    }
+}
+
+/// Paint and hit-test order of layers, back to front.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Order {
+    /// Panels and the central area.
+    Background,
+    /// Floating windows, ordered among themselves by last use.
+    Middle,
+    /// Popups and menus.
+    Foreground,
+    /// Tooltips, above everything.
+    Tooltip,
+}
+
+/// A drawing layer: everything in a layer is drawn above all layers that
+/// sort before it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LayerId {
+    /// Where the layer sorts.
+    pub order: Order,
+    /// Identifies the layer within its order.
+    pub id: Id,
+}
+
+impl LayerId {
+    /// A layer with the given order and id.
+    pub fn new(order: Order, id: Id) -> Self {
+        Self { order, id }
+    }
+
+    /// The layer of panels and the central area.
+    pub fn background() -> Self {
+        Self::new(Order::Background, Id::new("background"))
+    }
+}
+
+/// Mouse cursor shape requested for this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CursorIcon {
+    /// The normal arrow.
+    #[default]
+    Default,
+    /// A hand, for links.
+    PointingHand,
+    /// An open hand: something can be dragged.
+    Grab,
+    /// A closed hand: something is being dragged.
+    Grabbing,
+    /// A text cursor (I-beam).
+    Text,
+    /// Resize horizontally.
+    ResizeHorizontal,
+    /// Resize diagonally (bottom-right corner).
+    ResizeNwSe,
+}
+
+/// What the platform layer should draw and do after a frame.
+#[derive(Clone, Debug, Default)]
+pub struct FrameOutput {
+    /// Everything the Uis drew this frame, all layers merged back to front.
+    pub shapes: DisplayList,
+    /// Mouse cursor to show.
+    pub cursor: CursorIcon,
+    /// Run another frame soon, because this one's result depends on
+    /// information only available after it (e.g. which widget is on top).
+    pub repaint: bool,
+    /// Run another frame after this many seconds (e.g. to show a tooltip
+    /// after a delay), even without input.
+    pub repaint_after: Option<f64>,
+    /// Text to put on the system clipboard (copy/cut).
+    pub copied_text: Option<String>,
+    /// A text field has focus: enable the input method (IME) and show its
+    /// candidate window near this rectangle (the text cursor, in points).
+    pub ime_cursor: Option<Rect>,
+    /// Images to upload to (or remove from) the GPU before drawing.
+    pub textures: TexturesDelta,
+    /// The full accessibility tree, while assistive technology is active.
+    pub accesskit_update: Option<accesskit::TreeUpdate>,
+}
+
+/// A loaded image on the GPU. Cheap to clone; the texture is freed when
+/// the last clone is dropped.
+#[derive(Clone, Debug)]
+pub struct TextureHandle {
+    inner: Arc<HandleInner>,
+}
+
+#[derive(Debug)]
+struct HandleInner {
+    id: TextureId,
+    size: [u32; 2],
+    freed: Arc<Mutex<Vec<TextureId>>>,
+}
+
+impl Drop for HandleInner {
+    fn drop(&mut self) {
+        self.freed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(self.id);
+    }
+}
+
+impl TextureHandle {
+    /// Identifies the texture in shapes and meshes.
+    pub fn id(&self) -> TextureId {
+        self.inner.id
+    }
+
+    /// Size in pixels.
+    pub fn size(&self) -> [u32; 2] {
+        self.inner.size
+    }
+
+    /// Size in pixels as a vector (one point per pixel).
+    pub fn size_vec2(&self) -> Vec2 {
+        Vec2::new(self.inner.size[0] as f32, self.inner.size[1] as f32)
+    }
+}
+
+/// Images waiting to be uploaded, and ids of dropped handles.
+#[derive(Debug, Default)]
+struct TextureManager {
+    next_id: u64,
+    pending: Vec<(TextureId, ColorImage)>,
+    freed: Arc<Mutex<Vec<TextureId>>>,
+}
+
+/// A widget placed in a frame, for hit testing in the next one.
+#[derive(Clone, Copy, Debug)]
+struct Placed {
+    layer: LayerId,
+    id: Id,
+    rect: Rect,
+}
+
+/// Widgets placed during one frame, used for hit testing and focus
+/// navigation in the next one.
+#[derive(Debug)]
+struct FrameState {
+    /// Interactive widgets in the order they were added (later = on top
+    /// within a layer).
+    widgets: Vec<Placed>,
+    focusables: Vec<Id>,
+    /// Every widget id seen, interactive or not.
+    seen: Vec<Id>,
+    /// Shapes of each layer, in creation order.
+    layers: Vec<(LayerId, DisplayList)>,
+    root_count: usize,
+    /// Space not yet taken by panels.
+    available_rect: Rect,
+    output: FrameOutput,
+    /// A tooltip-capable widget was hovered this frame.
+    hover_tracked: bool,
+    /// Widget descriptions for screen readers (only while active).
+    described: Vec<DescribedWidget>,
+}
+
+impl Default for FrameState {
+    fn default() -> Self {
+        Self {
+            widgets: Vec::new(),
+            focusables: Vec::new(),
+            seen: Vec::new(),
+            layers: Vec::new(),
+            root_count: 0,
+            available_rect: Rect::EVERYTHING,
+            output: FrameOutput::default(),
+            hover_tracked: false,
+            described: Vec::new(),
+        }
+    }
+}
+
+/// Per-widget state of any type, kept between frames.
+#[derive(Default)]
+struct DataMap(HashMap<Id, Box<dyn Any + Send + Sync>>);
+
+impl std::fmt::Debug for DataMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DataMap({} entries)", self.0.len())
+    }
+}
+
+/// State kept between frames: input, style, which widget is pressed or
+/// focused, window order, per-widget data. Create one per window and pass
+/// it every frame.
+#[derive(Debug)]
+pub struct Context {
+    input: InputState,
+    style: Arc<Style>,
+    /// Widget the primary button was pressed on, until it is released.
+    active: Option<Id>,
+    /// The primary button was pressed on empty space and is still down:
+    /// no widget should react until it is released.
+    pressed_on_background: bool,
+    focused: Option<Id>,
+    /// Focus came from the keyboard, so it should be visible.
+    focus_visible: bool,
+    this_frame: FrameState,
+    prev_frame: FrameState,
+    /// Topmost interactive widget under the pointer, according to the
+    /// previous frame's layout.
+    hit: Option<Placed>,
+    /// Middle-layer (window) order, back to front.
+    window_order: Vec<LayerId>,
+    /// The id of the widget whose popup is open, if any.
+    open_popup: Option<Id>,
+    /// Widget being hovered for tooltip purposes, and since when.
+    hover_start: Option<(Id, f64)>,
+    textures: TextureManager,
+    /// Assistive technology (a screen reader) is listening.
+    accessibility_active: bool,
+    /// Requests from assistive technology, applied at the next frame.
+    accesskit_requests: Vec<accesskit::ActionRequest>,
+    /// Widgets to report as clicked because assistive technology asked.
+    pending_clicks: Vec<Id>,
+    data: DataMap,
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Self {
+            input: InputState::default(),
+            style: Arc::new(Style::default()),
+            active: None,
+            pressed_on_background: false,
+            focused: None,
+            focus_visible: false,
+            this_frame: FrameState::default(),
+            prev_frame: FrameState::default(),
+            hit: None,
+            window_order: Vec::new(),
+            open_popup: None,
+            hover_start: None,
+            textures: TextureManager::default(),
+            accessibility_active: false,
+            accesskit_requests: Vec::new(),
+            pending_clicks: Vec::new(),
+            data: DataMap::default(),
+        }
+    }
+}
+
+impl Context {
+    /// A new context with the default (dark) style.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The style used by default by every Ui.
+    pub fn style(&self) -> &Arc<Style> {
+        &self.style
+    }
+
+    /// Changes the style for the whole app, from this frame on.
+    pub fn set_style(&mut self, style: impl Into<Arc<Style>>) {
+        self.style = style.into();
+    }
+
+    /// Input of the current frame.
+    pub fn input(&self) -> &InputState {
+        &self.input
+    }
+
+    /// Mutable input, e.g. to consume keys or scrolling.
+    pub fn input_mut(&mut self) -> &mut InputState {
+        &mut self.input
+    }
+
+    /// The widget with keyboard focus, if any.
+    pub fn focused(&self) -> Option<Id> {
+        self.focused
+    }
+
+    /// Turns the accessibility tree on or off. The platform calls this when
+    /// a screen reader starts or stops listening.
+    pub fn set_accessibility_active(&mut self, active: bool) {
+        self.accessibility_active = active;
+    }
+
+    /// True while a screen reader is listening.
+    pub fn is_accessibility_active(&self) -> bool {
+        self.accessibility_active
+    }
+
+    /// Queues a request from assistive technology (e.g. "press this
+    /// button"), applied at the start of the next frame.
+    pub fn accesskit_action(&mut self, request: accesskit::ActionRequest) {
+        self.accesskit_requests.push(request);
+    }
+
+    /// Records how widget `id` should be presented to screen readers.
+    pub(crate) fn describe(&mut self, id: Id, info: WidgetInfo, rect: Rect, enabled: bool) {
+        if !self.accessibility_active {
+            return;
+        }
+        let focusable = self.this_frame.focusables.contains(&id);
+        self.this_frame.described.push(DescribedWidget {
+            id,
+            info,
+            rect,
+            enabled,
+            focusable,
+        });
+    }
+
+    /// Uploads an image for drawing with [`crate::Image`] or
+    /// `DisplayList::image`. Load once and keep the handle: the texture
+    /// lives until the last clone of the handle is dropped.
+    pub fn load_texture(&mut self, image: ColorImage) -> TextureHandle {
+        let manager = &mut self.textures;
+        manager.next_id += 1;
+        let id = TextureId::User(manager.next_id);
+        let size = image.size;
+        manager.pending.push((id, image));
+        TextureHandle {
+            inner: Arc::new(HandleInner {
+                id,
+                size,
+                freed: Arc::clone(&manager.freed),
+            }),
+        }
+    }
+
+    /// State stored for `id` with [`Context::insert_data`], if it has type `T`.
+    pub fn data<T: Clone + 'static>(&self, id: Id) -> Option<T> {
+        self.data.0.get(&id)?.downcast_ref::<T>().cloned()
+    }
+
+    /// Stores state for `id` (e.g. a widget's scroll offset) until replaced.
+    pub fn insert_data<T: Send + Sync + 'static>(&mut self, id: Id, value: T) {
+        self.data.0.insert(id, Box::new(value));
+    }
+
+    /// Runs another frame right after this one.
+    pub fn request_repaint(&mut self) {
+        self.this_frame.output.repaint = true;
+    }
+
+    /// Asks for another frame in `seconds`, even if no input arrives.
+    pub fn request_repaint_after(&mut self, seconds: f64) {
+        let after = &mut self.this_frame.output.repaint_after;
+        *after = Some(after.map_or(seconds, |a| a.min(seconds)));
+    }
+
+    /// Puts `text` on the system clipboard at the end of the frame.
+    pub fn copy_text(&mut self, text: String) {
+        self.this_frame.output.copied_text = Some(text);
+    }
+
+    /// Enables text composition (IME) for this frame, with the candidate
+    /// window placed near `cursor_rect`.
+    pub fn set_ime_cursor(&mut self, cursor_rect: Rect) {
+        self.this_frame.output.ime_cursor = Some(cursor_rect);
+    }
+
+    /// Removes keyboard focus from whatever widget has it.
+    pub fn clear_focus(&mut self) {
+        self.focused = None;
+    }
+
+    /// Mouse cursor to show for this frame (the last call wins).
+    pub fn set_cursor(&mut self, cursor: CursorIcon) {
+        self.this_frame.output.cursor = cursor;
+    }
+
+    /// The area not yet taken by panels this frame.
+    pub fn available_rect(&self) -> Rect {
+        self.this_frame.available_rect
+    }
+
+    /// Takes `rect` away from the available area (used by panels).
+    pub(crate) fn set_available_rect(&mut self, rect: Rect) {
+        self.this_frame.available_rect = rect;
+    }
+
+    // ---- Frame ----
+
+    /// Starts a frame: applies input, brings a clicked window to the front,
+    /// closes popups clicked outside of, and handles keyboard focus
+    /// navigation (Tab / Shift+Tab / Escape) using the previous frame.
+    pub fn begin_frame(&mut self, raw: RawInput) {
+        self.input.begin_frame(raw);
+        self.prev_frame = std::mem::take(&mut self.this_frame);
+        self.this_frame.available_rect = self.input.screen_rect;
+        self.hit = self.topmost(&self.prev_frame.widgets, self.input.pointer.interact_pos());
+
+        if self.input.pointer.primary_pressed() {
+            match self.hit {
+                Some(hit) => {
+                    if hit.layer.order == Order::Middle {
+                        self.move_to_top(hit.layer);
+                    }
+                }
+                None => {
+                    // Clicking on empty space removes focus.
+                    self.focused = None;
+                    self.pressed_on_background = true;
+                }
+            }
+            if let Some(popup) = self.open_popup {
+                let in_popup = self
+                    .hit
+                    .is_some_and(|h| h.layer == popup_layer(popup) || h.id == popup);
+                if !in_popup {
+                    self.open_popup = None;
+                }
+            }
+        }
+
+        for request in std::mem::take(&mut self.accesskit_requests) {
+            match accessibility::pending_action(&request, &self.prev_frame.described) {
+                Some(PendingAction::Focus(id)) => {
+                    self.focused = Some(id);
+                    self.focus_visible = true;
+                }
+                Some(PendingAction::Click(id)) => self.pending_clicks.push(id),
+                None => {}
+            }
+        }
+
+        if self.input.consume_key(Key::Tab, Modifiers::NONE) {
+            self.move_focus(true);
+        }
+        if self.input.consume_key(Key::Tab, Modifiers::SHIFT) {
+            self.move_focus(false);
+        }
+        if self.input.consume_key(Key::Escape, Modifiers::NONE) {
+            if self.open_popup.is_some() {
+                self.open_popup = None;
+            } else {
+                self.focused = None;
+            }
+        }
+    }
+
+    /// Ends a frame: returns the shapes of all layers merged in z-order,
+    /// and tells the platform layer what to do next.
+    pub fn end_frame(&mut self) -> FrameOutput {
+        let seen = &self.this_frame.seen;
+        if !self.input.pointer.primary_down() || self.active.is_some_and(|id| !seen.contains(&id)) {
+            self.active = None;
+        }
+        if !self.input.pointer.primary_down() {
+            self.pressed_on_background = false;
+        }
+        if self.focused.is_some_and(|id| !seen.contains(&id)) {
+            self.focused = None;
+        }
+        if self.open_popup.is_some_and(|id| !seen.contains(&id)) {
+            self.open_popup = None;
+        }
+        if !self.this_frame.hover_tracked {
+            self.hover_start = None;
+        }
+        // Forget windows that were not shown.
+        let layers = &self.this_frame.layers;
+        self.window_order
+            .retain(|w| layers.iter().any(|(l, _)| l == w));
+
+        // If the widget under the pointer differs from the one hover was
+        // computed with, run again so hover highlighting is correct.
+        let pos = self.input.pointer.pos();
+        let hit_now = self.topmost(&self.this_frame.widgets, pos).map(|p| p.id);
+        let hit_before = self.topmost(&self.prev_frame.widgets, pos).map(|p| p.id);
+        if hit_now != hit_before {
+            self.this_frame.output.repaint = true;
+        }
+
+        let mut layers = std::mem::take(&mut self.this_frame.layers);
+        layers.sort_by_key(|(layer, _)| self.layer_key(*layer));
+        if self.accessibility_active {
+            self.this_frame.output.accesskit_update = Some(accessibility::build_tree(
+                &self.this_frame.described,
+                self.focused,
+                self.input.screen_rect,
+                self.input.pixels_per_point,
+            ));
+        }
+        self.pending_clicks.clear();
+        let mut output = std::mem::take(&mut self.this_frame.output);
+        output.textures = TexturesDelta {
+            set: std::mem::take(&mut self.textures.pending),
+            free: std::mem::take(
+                &mut *self
+                    .textures
+                    .freed
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner),
+            ),
+        };
+        for (_, mut list) in layers {
+            output.shapes.append(&mut list);
+        }
+        output
+    }
+
+    /// Creates a root [`Ui`] laying out widgets inside `rect` (in points),
+    /// on the background layer.
+    pub fn ui<R>(
+        &mut self,
+        rect: Rect,
+        fonts: &mut Fonts,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> R {
+        let id = Id::new("root").with(self.this_frame.root_count);
+        self.this_frame.root_count += 1;
+        self.ui_in_layer(LayerId::background(), id, rect, fonts, add_contents)
+    }
+
+    /// Creates a root [`Ui`] drawing into `layer`.
+    pub fn ui_in_layer<R>(
+        &mut self,
+        layer: LayerId,
+        id: Id,
+        rect: Rect,
+        fonts: &mut Fonts,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> R {
+        if layer.order == Order::Middle && !self.window_order.contains(&layer) {
+            self.window_order.push(layer); // new windows open on top
+        }
+        let mut ui = Ui::new(self, fonts, layer, id, rect);
+        add_contents(&mut ui)
+    }
+
+    /// The shapes of `layer` for this frame.
+    pub(crate) fn layer_shapes(&mut self, layer: LayerId) -> &mut DisplayList {
+        let layers = &mut self.this_frame.layers;
+        let index = match layers.iter().position(|(l, _)| *l == layer) {
+            Some(i) => i,
+            None => {
+                layers.push((layer, DisplayList::new()));
+                layers.len() - 1
+            }
+        };
+        &mut layers[index].1
+    }
+
+    // ---- Interaction ----
+
+    /// Registers a widget for this frame and computes its interaction.
+    /// `clip` is the visible area; the widget can't be hit outside it.
+    pub fn interact(
+        &mut self,
+        layer: LayerId,
+        id: Id,
+        rect: Rect,
+        clip: Rect,
+        sense: Sense,
+    ) -> Response {
+        let visible = rect.intersect(clip);
+        self.this_frame.seen.push(id);
+        if sense.interactive() {
+            self.this_frame.widgets.push(Placed {
+                layer,
+                id,
+                rect: visible,
+            });
+        }
+        if sense.focusable {
+            self.this_frame.focusables.push(id);
+        }
+
+        let mut response = Response::new(id, rect);
+        let pointer = &self.input.pointer;
+        let over = pointer.interact_pos().is_some_and(|p| visible.contains(p));
+        // An interactive widget needs to be the topmost one; a hover-only
+        // widget (label, area) just needs nothing in a higher layer.
+        let covered = match self.hit {
+            Some(hit) if sense.interactive() => hit.id != id,
+            Some(hit) => self.layer_key(hit.layer) > self.layer_key(layer),
+            None => false,
+        };
+        let other_active =
+            self.active.is_some_and(|active| active != id) || self.pressed_on_background;
+        response.hovered = over && !covered && !other_active;
+
+        if sense.interactive() {
+            if response.hovered && pointer.primary_pressed() {
+                self.active = Some(id);
+                response.drag_started = sense.drag;
+                if sense.focusable {
+                    self.focused = Some(id);
+                    self.focus_visible = false;
+                }
+            }
+            if self.active == Some(id) {
+                if let Some(pos) = pointer.released_at(PointerButton::Primary) {
+                    response.clicked = sense.click && visible.contains(pos);
+                    response.drag_stopped = sense.drag;
+                } else if pointer.primary_down() {
+                    response.pressed = true;
+                    if sense.drag {
+                        response.dragged = true;
+                        response.drag_delta = pointer.delta();
+                    }
+                }
+            }
+        }
+
+        if sense.click
+            && let Some(i) = self.pending_clicks.iter().position(|c| *c == id)
+        {
+            self.pending_clicks.remove(i);
+            response.clicked = true;
+        }
+
+        response.has_focus = self.focused == Some(id);
+        response.focus_visible = self.focus_visible;
+        if response.has_focus
+            && sense.click
+            && sense.activate_with_keys
+            && (self.input.consume_key(Key::Enter, Modifiers::NONE)
+                || self.input.consume_key(Key::Space, Modifiers::NONE))
+        {
+            response.clicked = true;
+        }
+        response
+    }
+
+    /// Seconds `id` has been continuously hovered (0 when not hovered).
+    /// Used for tooltips.
+    pub(crate) fn hover_duration(&mut self, id: Id, hovered: bool) -> f64 {
+        if !hovered {
+            return 0.0;
+        }
+        self.this_frame.hover_tracked = true;
+        let now = self.input.time;
+        match self.hover_start {
+            Some((hovered_id, start)) if hovered_id == id => now - start,
+            _ => {
+                self.hover_start = Some((id, now));
+                0.0
+            }
+        }
+    }
+
+    // ---- Animation ----
+
+    /// A value that moves smoothly from 0 to 1 while `on` is true, and
+    /// back to 0 when it becomes false, over the style's animation time.
+    /// Requests frames while it is moving.
+    pub fn animate_bool(&mut self, id: Id, on: bool) -> f32 {
+        let duration = self.style.animation_time;
+        self.animate_bool_with_time(id, on, duration)
+    }
+
+    /// Like [`Context::animate_bool`] with an explicit duration in seconds.
+    pub fn animate_bool_with_time(&mut self, id: Id, on: bool, duration: f32) -> f32 {
+        let target = if on { 1.0 } else { 0.0 };
+        if duration <= 0.0 {
+            return target;
+        }
+        let now = self.input.time;
+        let Some(mut anim) = self.data::<Animation>(id) else {
+            // First time: start at rest in the current state.
+            let anim = Animation {
+                from: target,
+                to: target,
+                start: now,
+            };
+            self.insert_data(id, anim);
+            return target;
+        };
+        let value = |a: &Animation| {
+            let t = ((now - a.start) as f32 / duration).clamp(0.0, 1.0);
+            // Ease out: fast start, gentle stop.
+            let eased = 1.0 - (1.0 - t) * (1.0 - t);
+            a.from + (a.to - a.from) * eased
+        };
+        if anim.to != target {
+            anim = Animation {
+                from: value(&anim),
+                to: target,
+                start: now,
+            };
+            self.insert_data(id, anim);
+        }
+        let current = value(&anim);
+        if current != target {
+            self.request_repaint();
+        }
+        current
+    }
+
+    // ---- Popups ----
+
+    /// True if the popup of widget `id` is open.
+    pub fn is_popup_open(&self, id: Id) -> bool {
+        self.open_popup == Some(id)
+    }
+
+    /// Opens the popup belonging to widget `id`, closing any other.
+    pub fn open_popup(&mut self, id: Id) {
+        self.open_popup = Some(id);
+    }
+
+    /// Closes the open popup, if any.
+    pub fn close_popup(&mut self) {
+        self.open_popup = None;
+    }
+
+    // ---- Helpers ----
+
+    /// Sort key of a layer: paint and hit-test order.
+    fn layer_key(&self, layer: LayerId) -> (Order, usize) {
+        let index = match layer.order {
+            Order::Middle => self
+                .window_order
+                .iter()
+                .position(|l| *l == layer)
+                .unwrap_or(usize::MAX),
+            _ => 0,
+        };
+        (layer.order, index)
+    }
+
+    fn move_to_top(&mut self, layer: LayerId) {
+        self.window_order.retain(|l| *l != layer);
+        self.window_order.push(layer);
+    }
+
+    /// The widget that would receive a click at `pos`: in the highest
+    /// layer, and the last added within it.
+    fn topmost(&self, widgets: &[Placed], pos: Option<Point>) -> Option<Placed> {
+        let pos = pos?;
+        widgets
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| w.rect.contains(pos))
+            .max_by_key(|(i, w)| (self.layer_key(w.layer), *i))
+            .map(|(_, w)| *w)
+    }
+
+    fn move_focus(&mut self, forward: bool) {
+        let list = &self.prev_frame.focusables;
+        if list.is_empty() {
+            return;
+        }
+        let current = self
+            .focused
+            .and_then(|id| list.iter().position(|f| *f == id));
+        let next = match (current, forward) {
+            (None, true) => 0,
+            (None, false) => list.len() - 1,
+            (Some(i), true) => (i + 1) % list.len(),
+            (Some(i), false) => (i + list.len() - 1) % list.len(),
+        };
+        self.focused = Some(list[next]);
+        self.focus_visible = true;
+    }
+}
+
+/// State of one [`Context::animate_bool`] value.
+#[derive(Clone, Copy, Debug)]
+struct Animation {
+    from: f32,
+    to: f32,
+    /// Time the animation towards `to` started.
+    start: f64,
+}
+
+/// The layer a popup opened by widget `id` is drawn in.
+pub(crate) fn popup_layer(id: Id) -> LayerId {
+    LayerId::new(Order::Foreground, id.with("popup"))
+}
