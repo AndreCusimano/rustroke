@@ -52,12 +52,11 @@ impl GridLayout {
             + (0..self.col)
                 .map(|i| width_of(i) + self.spacing.x)
                 .sum::<f32>();
-        // Known width from last frame, but never past the available area.
-        let remaining = (max_x - x).max(0.0);
-        let width = match self.prev.col_widths.get(self.col) {
-            Some(w) => w.min(remaining),
-            None => remaining,
-        };
+        // A cell offers all the remaining width: last frame's column width
+        // only positions the columns. Limiting a cell to it would freeze a
+        // column at its old size (e.g. a field with a desired width added
+        // to a column that only had empty cells).
+        let width = (max_x - x).max(0.0);
         Rect::from_min_size(
             Point::new(x, self.row_top),
             Vec2::new(width, self.row_height_hint()),

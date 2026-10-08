@@ -1250,3 +1250,121 @@ fn screen_reader_actions_click_and_focus() {
     let update = out.accesskit_update.unwrap();
     assert_eq!(update.focus, node_by_label(&update, "Save").0);
 }
+
+// ---- Regressions reported by CAD3D ----
+
+/// LAY-01: a widget reaching under a side panel's resize grip must still
+/// be clickable (the grip only takes clicks where there is no widget).
+#[test]
+fn widgets_win_over_the_panel_resize_grip() {
+    let mut h = Harness::new();
+    let mut checked = false;
+    let mut rect = Rect::NOTHING;
+    let run = |h: &mut Harness, events, checked: &mut bool, rect: &mut Rect| {
+        h.frame_with(events, |h| {
+            Panel::left("side").default_size(120.0).show(h, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(96.0);
+                    *rect = ui.checkbox(checked, "").rect;
+                });
+            });
+        });
+    };
+    run(&mut h, vec![], &mut checked, &mut rect);
+    run(&mut h, vec![], &mut checked, &mut rect);
+    let under_grip = point(118.0, rect.center().y);
+    assert!(rect.contains(under_grip));
+    run(
+        &mut h,
+        vec![button(under_grip, true), button(under_grip, false)],
+        &mut checked,
+        &mut rect,
+    );
+    assert!(checked, "the checkbox got the click, not the grip");
+
+    // Where there is no widget the grip still resizes the panel.
+    let free = point(120.0, 250.0);
+    run(&mut h, vec![button(free, true)], &mut checked, &mut rect);
+    run(
+        &mut h,
+        vec![move_to(point(160.0, 250.0))],
+        &mut checked,
+        &mut rect,
+    );
+    run(
+        &mut h,
+        vec![button(point(160.0, 250.0), false)],
+        &mut checked,
+        &mut rect,
+    );
+    let mut width = 0.0;
+    h.frame_with(vec![], |h| {
+        width = Panel::left("side")
+            .default_size(120.0)
+            .show(h, |_| {})
+            .response
+            .rect
+            .width();
+    });
+    assert_eq!(width, 160.0);
+}
+
+/// LAY-01 (windows): a widget in a window's bottom-right corner is
+/// clickable despite the resize grip there.
+#[test]
+fn widgets_win_over_the_window_resize_grip() {
+    let mut h = Harness::new();
+    let mut clicked = false;
+    let mut rect = Rect::NOTHING;
+    let run = |h: &mut Harness, events, rect: &mut Rect| {
+        let mut c = false;
+        h.frame_with(events, |h| {
+            Window::new("W")
+                .default_pos(point(20.0, 20.0))
+                .default_width(200.0)
+                .show(h, |ui| {
+                    let r =
+                        ui.add_sized(vec2(ui.available_width(), 40.0), crate::Button::new("wide"));
+                    *rect = r.rect;
+                    c = r.clicked();
+                });
+        });
+        c
+    };
+    run(&mut h, vec![], &mut rect);
+    run(&mut h, vec![], &mut rect);
+    let corner = point(rect.max.x - 2.0, rect.max.y - 2.0);
+    clicked |= run(
+        &mut h,
+        vec![button(corner, true), button(corner, false)],
+        &mut rect,
+    );
+    assert!(clicked);
+}
+
+/// LAY-03: a field with a desired width added to a grid column that only
+/// had empty cells gets its width (the column grows instead of staying
+/// at its old size).
+#[test]
+fn grid_cells_allow_desired_widths() {
+    let mut h = Harness::new();
+    let mut text = String::from("40 mm");
+    let mut width = 0.0;
+    for frame in 0..4 {
+        h.frame(vec![], |ui| {
+            crate::Grid::new("g").show(ui, |ui| {
+                ui.label("Value");
+                if frame >= 2 {
+                    width = ui
+                        .add(crate::TextEdit::singleline(&mut text).desired_width(110.0))
+                        .rect
+                        .width();
+                } else {
+                    ui.label("");
+                }
+                ui.end_row();
+            });
+        });
+    }
+    assert_eq!(width, 110.0);
+}

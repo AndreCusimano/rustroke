@@ -167,6 +167,23 @@ impl Panel {
             };
             ui.painter().line(a, b, visuals.window_stroke);
 
+            // The resize grip straddles the edge, so it isn't clipped to the
+            // panel. It is registered before the content so that widgets
+            // under it win (hit testing prefers what was added last).
+            let grip_response = (self.resizable && vertical_side).then(|| {
+                let x = if self.side == PanelSide::Left {
+                    rect.max.x
+                } else {
+                    rect.min.x
+                };
+                let grip =
+                    Rect::from_min_max(point(x - 3.0, rect.min.y), point(x + 3.0, rect.max.y));
+                ui.clip_rect_restore(unclipped);
+                let r = ui.interact(self.id.with("resize"), grip, Sense::POINTER_DRAG);
+                ui.set_clip_rect(rect);
+                r
+            });
+
             let content = ui.scope_with(
                 rect.expand(-pad),
                 Layout::top_down(Align::Min),
@@ -178,19 +195,8 @@ impl Panel {
                 content.response.rect.height() + 2.0 * pad
             };
 
-            // The resize grip straddles the edge, so it isn't clipped to the panel.
             ui.clip_rect_restore(unclipped);
-            if self.resizable && vertical_side {
-                // A thin strip on the inner edge.
-                let x = if self.side == PanelSide::Left {
-                    rect.max.x
-                } else {
-                    rect.min.x
-                };
-                let grip =
-                    Rect::from_min_max(point(x - 3.0, rect.min.y), point(x + 3.0, rect.max.y));
-                let id = self.id.with("resize");
-                let r = ui.interact(id, grip, Sense::POINTER_DRAG);
+            if let Some(r) = grip_response {
                 if r.hovered() || r.dragged() {
                     ui.ctx().set_cursor(CursorIcon::ResizeHorizontal);
                     let color = visuals.accent;
@@ -386,6 +392,13 @@ impl<'open> Window<'open> {
                 close = r.clicked();
             }
 
+            // Resize grip in the bottom-right corner, registered before the
+            // content so that widgets reaching into the corner win.
+            let grip_response = self.resizable.then(|| {
+                let grip = Rect::from_min_max(rect.max - Vec2::splat(14.0), rect.max);
+                ui.interact(self.id.with("resize"), grip, Sense::POINTER_DRAG)
+            });
+
             // Content.
             ui.set_clip_rect(rect);
             let content_max = Rect::from_min_max(
@@ -394,10 +407,7 @@ impl<'open> Window<'open> {
             );
             let content = ui.scope_with(content_max, Layout::top_down(Align::Min), add_contents);
 
-            // Resize grip in the bottom-right corner.
-            if self.resizable {
-                let grip = Rect::from_min_max(rect.max - Vec2::splat(14.0), rect.max);
-                let r = ui.interact(self.id.with("resize"), grip, Sense::POINTER_DRAG);
+            if let Some(r) = grip_response {
                 if r.hovered() || r.dragged() {
                     ui.ctx().set_cursor(CursorIcon::ResizeNwSe);
                 }

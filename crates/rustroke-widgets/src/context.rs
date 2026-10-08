@@ -663,7 +663,13 @@ impl Context {
                     response.pressed = true;
                     if sense.drag {
                         response.dragged = true;
-                        response.drag_delta = pointer.delta();
+                        // On the press frame only the movement after the press
+                        // counts; earlier movement is not part of the drag.
+                        response.drag_delta =
+                            match (pointer.pressed_at(PointerButton::Primary), pointer.pos()) {
+                                (Some(start), Some(now)) => now - start,
+                                _ => pointer.delta(),
+                            };
                     }
                 }
             }

@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-10-08
+
+### Fixed
+
+- Widgets under the resize grip of a side panel or in a window's
+  bottom-right corner are clickable again: the grips now take only clicks
+  where there is no widget (CAD3D LAY-01).
+- A grid column grows to fit a widget's desired width (e.g. a `TextEdit`
+  with `desired_width`), instead of staying at last frame's width when it
+  only had empty cells before (CAD3D LAY-03).
+- On the frame a drag starts, `Response::drag_delta` only counts the
+  movement after the press.
+
 ## [0.1.0] — 2026-10-08
 
 First release of **Rustroke**.
@@ -44,5 +57,6 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/AndreCusimano/rustroke/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/AndreCusimano/rustroke/releases/tag/v0.1.0
