@@ -850,3 +850,93 @@ fn lists_light_2x() {
         check_snapshot("lists_light_2x", size, &pixels);
     }
 }
+
+/// INT-02: a callback draws inside its rectangle, in order with the UI.
+#[test]
+fn paint_callbacks_draw_in_their_rect() {
+    use rustroke_render::CallbackFn;
+
+    let mut atlas = TextureAtlas::new(64);
+    let mut renderer = match pollster::block_on(OffscreenRenderer::new(&atlas)) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("skipping callback test: {e}");
+            return;
+        }
+    };
+    let device = renderer.device().clone();
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("test callback"),
+        source: wgpu::ShaderSource::Wgsl(
+            "@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+                 let p = array(vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
+                 return vec4(p[i], 0.0, 1.0);
+             }
+             @fragment fn fs() -> @location(0) vec4<f32> { return vec4(1.0, 0.0, 0.0, 1.0); }"
+                .into(),
+        ),
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("test callback"),
+        layout: None,
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(renderer.target_format().into())],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    let prepared = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&prepared);
+    let callback = CallbackFn::new(move |_info, pass| {
+        pass.set_pipeline(&pipeline);
+        pass.draw(0..3, 0..1);
+    })
+    .prepare(move |_, _, _, info| {
+        assert_eq!(info.viewport, [20.0, 20.0, 40.0, 30.0]);
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+
+    let mut list = DisplayList::new();
+    let area = Rect::from_min_size(point(10.0, 10.0), vec2(20.0, 15.0));
+    list.add(callback.into_shape(area));
+    // Drawn after the callback, so on top of it.
+    list.rect_filled(
+        Rect::from_min_size(point(12.0, 12.0), vec2(4.0, 4.0)),
+        0.0,
+        Color::from_srgb8(0, 0, 255),
+    );
+    let meshes = Tessellator::new(2.0, &atlas).tessellate(&list);
+    let job = PaintJob {
+        meshes: &meshes,
+        textures: &rustroke_core::TexturesDelta::default(),
+        pixels_per_point: 2.0,
+        clear_color: Color::BLACK,
+    };
+    let size = PhysicalSize::new(80, 80);
+    let pixels = renderer.render(size, &job, &mut atlas);
+    let px = |x: u32, y: u32| {
+        let i = ((y * 80 + x) * 4) as usize;
+        [pixels[i], pixels[i + 1], pixels[i + 2]]
+    };
+    assert!(prepared.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(px(50, 40), [255, 0, 0], "inside the callback's rect");
+    assert_eq!(px(70, 70), [0, 0, 0], "outside it");
+    assert_eq!(px(10, 10), [0, 0, 0], "outside it");
+    assert_eq!(
+        px(28, 28),
+        [0, 0, 255],
+        "the UI shape added later is on top"
+    );
+}

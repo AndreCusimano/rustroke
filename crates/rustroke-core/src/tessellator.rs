@@ -7,8 +7,8 @@
 use std::f32::consts::TAU;
 
 use crate::{
-    ClippedShape, Color, DisplayList, Galley, Point, Rect, Shape, Stroke, TextureAtlas, TextureId,
-    Vec2,
+    ClippedShape, Color, DisplayList, Galley, PaintCallback, Point, Rect, Shape, Stroke,
+    TextureAtlas, TextureId, Vec2,
 };
 
 /// One vertex of a [`Mesh`].
@@ -61,6 +61,9 @@ pub struct ClippedMesh {
     pub clip_rect: Rect,
     /// Triangles to draw.
     pub mesh: Mesh,
+    /// Custom drawing instead of triangles (the mesh is then empty), in
+    /// the order it appears among the meshes.
+    pub callback: Option<PaintCallback>,
 }
 
 /// Converts display lists into meshes. Reuse one instance across frames to
@@ -116,12 +119,24 @@ impl Tessellator {
             {
                 continue; // fully clipped away
             }
+            if let Shape::Callback(callback) = shape {
+                out.push(ClippedMesh {
+                    clip_rect: *clip_rect,
+                    mesh: Mesh::default(),
+                    callback: Some(callback.clone()),
+                });
+                continue;
+            }
             let texture = match shape {
                 Shape::Image { texture, .. } => *texture,
                 _ => TextureId::Atlas,
             };
             let mesh = match out.last_mut() {
-                Some(last) if last.clip_rect == *clip_rect && last.mesh.texture == texture => {
+                Some(last)
+                    if last.callback.is_none()
+                        && last.clip_rect == *clip_rect
+                        && last.mesh.texture == texture =>
+                {
                     &mut last.mesh
                 }
                 _ => {
@@ -131,13 +146,14 @@ impl Tessellator {
                             texture,
                             ..Mesh::default()
                         },
+                        callback: None,
                     });
                     &mut out.last_mut().expect("just pushed").mesh
                 }
             };
             self.tessellate_shape(shape, mesh);
         }
-        out.retain(|m| !m.mesh.is_empty());
+        out.retain(|m| !m.mesh.is_empty() || m.callback.is_some());
         out
     }
 
@@ -180,6 +196,8 @@ impl Tessellator {
                 self.fill_and_stroke(*closed, *fill, *stroke, mesh);
             }
             Shape::Text { pos, galley, color } => self.add_text(*pos, galley, *color, mesh),
+            // Drawn by the renderer (see `tessellate`), not as triangles.
+            Shape::Callback(_) => {}
             Shape::Image { rect, uv, tint, .. } => {
                 if tint.a <= 0.0 {
                     return;

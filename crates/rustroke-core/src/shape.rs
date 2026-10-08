@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::Arc;
 
 use crate::{Color, Galley, Point, Rect, TextureId};
@@ -26,6 +27,43 @@ impl Stroke {
     /// True if drawing this stroke would have no visible effect.
     pub fn is_none(&self) -> bool {
         self.width <= 0.0 || self.color.a <= 0.0
+    }
+}
+
+/// Custom drawing inside `rect`, done by the renderer instead of being
+/// tessellated: e.g. a wgpu render pass of the application. The renderer
+/// recognizes the callback type it supports (for the wgpu renderer:
+/// `rustroke_render::CallbackFn`) and ignores others.
+#[derive(Clone)]
+pub struct PaintCallback {
+    /// Where to draw, in logical points; the renderer sets its viewport
+    /// to this area.
+    pub rect: Rect,
+    /// The renderer-specific drawing code.
+    pub callback: Arc<dyn Any + Send + Sync>,
+}
+
+impl PaintCallback {
+    /// A callback drawing into `rect`.
+    pub fn new(rect: Rect, callback: impl Any + Send + Sync) -> Self {
+        Self {
+            rect,
+            callback: Arc::new(callback),
+        }
+    }
+}
+
+impl std::fmt::Debug for PaintCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaintCallback")
+            .field("rect", &self.rect)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for PaintCallback {
+    fn eq(&self, other: &Self) -> bool {
+        self.rect == other.rect && Arc::ptr_eq(&self.callback, &other.callback)
     }
 }
 
@@ -96,6 +134,8 @@ pub enum Shape {
         /// Outline ([`Stroke::NONE`] for none).
         stroke: Stroke,
     },
+    /// Drawing done by the renderer itself (see [`PaintCallback`]).
+    Callback(PaintCallback),
 }
 
 impl Shape {
@@ -113,6 +153,8 @@ impl Shape {
             Self::LineSegment { stroke, .. } => fade(&mut stroke.color),
             Self::Text { color, .. } => fade(color),
             Self::Image { tint, .. } => fade(tint),
+            // Custom drawing can't be faded from here.
+            Self::Callback(_) => {}
         }
     }
 
@@ -130,7 +172,7 @@ impl Shape {
                 Rect::from_min_max(points[0].min(points[1]), points[0].max(points[1]))
                     .expand(half_width(stroke))
             }
-            Self::Image { rect, .. } => *rect,
+            Self::Image { rect, .. } | Self::Callback(PaintCallback { rect, .. }) => *rect,
             Self::Text { pos, galley, .. } => {
                 let r = galley.bounding_rect();
                 Rect::from_min_max(*pos + r.min.to_vec2(), *pos + r.max.to_vec2())

@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-09
+
+### Added
+
+- **Paint callbacks**: `CallbackFn::new(|info, render_pass| ..)` (with an
+  optional `.prepare(|device, queue, encoder, info| ..)`) draws with the
+  application's own wgpu pipelines inside a rectangle of the UI, in the
+  UI's render pass and in order with it: `ui.painter().add(callback
+  .into_shape(rect))`. The viewport covers the rectangle and the scissor
+  keeps drawing inside it. New `Shape::Callback(PaintCallback)` in the core
+  (renderer-independent), `ClippedMesh::callback`, `CallbackInfo`,
+  `Frame::wgpu_target_format()`, `Renderer::target_format()` and
+  `OffscreenRenderer::target_format()`.
+- **Integration in an existing event loop**: `Integration` embeds the UI in
+  an application that owns its winit window and wgpu device:
+  `on_window_event` (says whether the UI consumed the event, so clicks on a
+  panel don't reach the 3D view), `run(window, |frame| ..)` and
+  `paint(device, queue, encoder, view, size)`, which draws over the
+  application's content. `run_frame` runs without a window.
+- `Painter::paint_over` draws without clearing the target first.
+- `Context::is_pointer_over_ui(pos)` and `Context::wants_pointer_input()`.
+- `rustroke::winit` re-exports the winit version rustroke uses;
+  `PhysicalSize` is re-exported by `rustroke`.
+- New examples: `custom_wgpu` (a shader inside the UI) and `integration`
+  (the UI inside your own winit loop).
+
 ## [0.4.0] — 2026-10-09
 
 ### Added
@@ -186,7 +212,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/AndreCusimano/rustroke/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AndreCusimano/rustroke/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AndreCusimano/rustroke/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AndreCusimano/rustroke/compare/v0.1.1...v0.2.0

@@ -102,7 +102,12 @@
 //!   themselves with [`Ui::describe`].
 //! - **Your own GPU rendering** (e.g. a 3D viewport): get rustroke's device
 //!   and queue with [`Frame::wgpu`], render into your texture and show it
-//!   with [`Frame::register_native_texture`] — no copies.
+//!   with [`Frame::register_native_texture`] — no copies. Smaller custom
+//!   drawings can run inside the UI's render pass with a [`CallbackFn`]
+//!   (`ui.painter().add(callback.into_shape(rect))`).
+//! - **Your own event loop**: an app that already owns its winit window
+//!   and wgpu device embeds the UI with [`Integration`] (events in, UI
+//!   drawn over your content), instead of calling [`run`].
 //! - **Background work**: [`Frame::repaint_handle`] gives a
 //!   [`RepaintHandle`] that wakes the UI up from any thread.
 //! - **Window**: [`Frame::set_title`]; [`App::on_close_requested`] can keep
@@ -113,7 +118,7 @@
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
-//! `files`, `layout`,
+//! `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
 //!
@@ -126,8 +131,8 @@
 
 pub use rustroke_core::{
     Color, ColorImage, DisplayList, Event, Galley, ImeEvent, InputState, Key, KeyboardShortcut,
-    Modifiers, POINTS_PER_SCROLL_LINE, Point, PointerButton, RawInput, Rect, Shape, Stroke,
-    TextureId, TexturesDelta, Vec2, point, vec2,
+    Modifiers, POINTS_PER_SCROLL_LINE, PaintCallback, PhysicalSize, Point, PointerButton, RawInput,
+    Rect, Shape, Stroke, TextureId, TexturesDelta, Vec2, point, vec2,
 };
 pub use rustroke_text::{
     FontFamily, Fonts, ICON_ACCENT_SOURCE_COLOR, IconError, IconId, IconLayer, RasterizedIcon,
@@ -142,7 +147,10 @@ pub use rustroke_widgets::{
     Spinner, Style, TextEdit, TextureHandle, Ui, UiRoot, Visuals, Widget, WidgetDescription,
     WidgetInfo, WidgetRole, Window,
 };
-pub use rustroke_winit::{App, Frame, RunError, WindowOptions, run, testing, wgpu};
+pub use rustroke_winit::{
+    App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,
+    WindowOptions, run, testing, wgpu, winit,
+};
 
 /// Decodes a PNG or JPEG file (already read into memory) into an image
 /// that can be uploaded with `Context::load_texture`.

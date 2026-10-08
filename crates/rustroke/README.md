@@ -108,7 +108,10 @@ fn main() -> Result<(), rustroke::RunError> {
 - **Mouse and keyboard**: clicks and drags with any button, Tab navigation,
   Enter/Space activation, arrow keys, keyboard shortcuts shown in menus.
 - **Your own GPU rendering**: render a 3D viewport (or anything) with wgpu
-  into your own texture and show it in the UI without copies.
+  into your own texture and show it in the UI without copies, or draw with
+  your own shaders inside the UI's render pass (paint callbacks).
+- **Your own event loop**: embed the UI in an app that already owns its
+  winit window and wgpu device (`rustroke::Integration`).
 - **Testing**: run your app without a window, click widgets by label, type
   text, check the result and render the frame to a PNG
   (`rustroke::testing::Harness`).
@@ -132,6 +135,8 @@ cargo run -p rustroke --example widgets     # buttons, checkboxes, radios, slide
 cargo run -p rustroke --example properties  # tree, property panel, combo boxes, drag values, shortcuts
 cargo run -p rustroke --example lists       # SVG icons, reorderable list, horizontal scrolling
 cargo run -p rustroke --example files       # open and save files with native dialogs (rfd)
+cargo run -p rustroke --example custom_wgpu # your own shader inside the UI (paint callback)
+cargo run -p rustroke --example integration # the UI inside your own winit loop and wgpu device
 cargo run -p rustroke --example layout      # rows, alignment, wrapping, grids
 cargo run -p rustroke --example containers  # menus, panels, windows, scroll areas, tooltips
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
@@ -183,7 +188,7 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.4: the core is complete and tested (interaction tests without a
+Version 0.5: the core is complete and tested (interaction tests without a
 window, GPU snapshot tests, CI on macOS, Windows and Linux). Known limitations
 are listed in the [changelog](CHANGELOG.md). Coming next: extending and
 customizing shapes, and a visual screen designer built with Rustroke itself.

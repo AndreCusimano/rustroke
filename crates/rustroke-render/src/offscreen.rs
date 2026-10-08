@@ -38,6 +38,11 @@ impl OffscreenRenderer {
         &self.queue
     }
 
+    /// Format of the images it renders (see [`crate::Renderer::target_format`]).
+    pub fn target_format(&self) -> wgpu::TextureFormat {
+        FORMAT
+    }
+
     /// See [`crate::Renderer::register_native_texture`].
     pub fn register_native_texture(
         &mut self,

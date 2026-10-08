@@ -4,6 +4,7 @@
 //! turn into a surface (e.g. an `Arc<winit::window::Window>`), and
 //! [`OffscreenRenderer`] draws into an image without any window at all.
 
+mod callback;
 mod offscreen;
 mod painter;
 
@@ -12,6 +13,7 @@ use std::fmt;
 use rustroke_core::{PhysicalSize, TextureAtlas};
 use wgpu::wgt::WgpuHasDisplayHandle;
 
+pub use callback::{CallbackFn, CallbackInfo};
 pub use offscreen::OffscreenRenderer;
 pub use painter::{PaintJob, Painter};
 /// The wgpu version rustroke uses, so applications use the same types.
@@ -127,6 +129,12 @@ impl Renderer {
         view: &wgpu::TextureView,
     ) {
         self.painter.set_native_texture(&self.device, id, view);
+    }
+
+    /// Format of the window surface: create pipelines for [`CallbackFn`]s
+    /// with it.
+    pub fn target_format(&self) -> wgpu::TextureFormat {
+        self.config.format
     }
 
     /// Current surface size in physical pixels.

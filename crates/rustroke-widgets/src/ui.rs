@@ -83,6 +83,7 @@ impl<'a> Ui<'a> {
         max_rect: Rect,
     ) -> Self {
         let style = Arc::clone(ctx.style());
+        ctx.add_ui_area(max_rect);
         Self {
             ctx,
             fonts,

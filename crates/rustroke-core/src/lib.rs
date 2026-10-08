@@ -20,6 +20,6 @@ pub use input::{
     Event, ImeEvent, InputState, Key, KeyboardShortcut, Modifiers, POINTS_PER_SCROLL_LINE,
     PointerButton, RawInput,
 };
-pub use shape::{Shape, Stroke};
+pub use shape::{PaintCallback, Shape, Stroke};
 pub use tessellator::{ClippedMesh, Mesh, Tessellator, Vertex};
 pub use texture::{ColorImage, TextureId, TexturesDelta};

@@ -311,6 +311,8 @@ struct FrameState {
     described: Vec<WidgetDescription>,
     /// The focused widget takes keyboard input (a text field).
     keyboard_owner: Option<Id>,
+    /// Areas of the top-level Uis (panels, windows, popups).
+    ui_areas: Vec<Rect>,
 }
 
 impl Default for FrameState {
@@ -326,6 +328,7 @@ impl Default for FrameState {
             hover_tracked: false,
             described: Vec::new(),
             keyboard_owner: None,
+            ui_areas: Vec::new(),
         }
     }
 }
@@ -372,6 +375,8 @@ pub struct Context {
     repaint_callback: RepaintCallback,
     /// Assistive technology (a screen reader) is listening.
     accessibility_active: bool,
+    /// Between `begin_frame` and `end_frame`.
+    in_frame: bool,
     /// Widgets described in the last completed frame.
     last_widgets: Vec<WidgetDescription>,
     /// Requests from assistive technology, applied at the next frame.
@@ -399,6 +404,7 @@ impl Default for Context {
             hover_start: None,
             textures: TextureManager::default(),
             repaint_callback: RepaintCallback(None),
+            in_frame: false,
             accessibility_active: false,
             last_widgets: Vec::new(),
             accesskit_requests: Vec::new(),
@@ -568,6 +574,30 @@ impl Context {
         })
     }
 
+    /// Whether `pos` (window coordinates, points) is over the UI of the
+    /// last frame: a panel, window, popup or widget. When rustroke is
+    /// embedded in an app that draws its own content (a 3D view), events
+    /// there belong to the UI, not to the app.
+    pub fn is_pointer_over_ui(&self, pos: Point) -> bool {
+        let frame = if self.in_frame {
+            &self.prev_frame
+        } else {
+            &self.this_frame
+        };
+        frame.ui_areas.iter().any(|r| r.contains(pos))
+            || frame.widgets.iter().any(|w| w.rect.contains(pos))
+    }
+
+    /// A widget is being pressed or dragged (e.g. a slider), so pointer
+    /// movement belongs to the UI even outside it.
+    pub fn wants_pointer_input(&self) -> bool {
+        self.active.is_some()
+    }
+
+    pub(crate) fn add_ui_area(&mut self, rect: Rect) {
+        self.this_frame.ui_areas.push(rect);
+    }
+
     /// Marks the focused widget `id` as taking keyboard input, so Escape
     /// is left to it and [`Context::wants_keyboard_input`] is true.
     pub(crate) fn set_keyboard_owner(&mut self, id: Id) {
@@ -595,6 +625,7 @@ impl Context {
     /// closes popups clicked outside of, and handles keyboard focus
     /// navigation (Tab / Shift+Tab / Escape) using the previous frame.
     pub fn begin_frame(&mut self, raw: RawInput) {
+        self.in_frame = true;
         self.input.begin_frame(raw);
         self.prev_frame = std::mem::take(&mut self.this_frame);
         self.this_frame.available_rect = self.input.screen_rect;
@@ -662,6 +693,7 @@ impl Context {
     /// Ends a frame: returns the shapes of all layers merged in z-order,
     /// and tells the platform layer what to do next.
     pub fn end_frame(&mut self) -> FrameOutput {
+        self.in_frame = false;
         let seen = &self.this_frame.seen;
         let active_button_down = self.input.pointer.is_down(self.active_button);
         if !active_button_down || self.active.is_some_and(|id| !seen.contains(&id)) {

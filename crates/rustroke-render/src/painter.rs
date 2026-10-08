@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use rustroke_core::{ClippedMesh, Color, PhysicalSize, TextureAtlas, TextureId, TexturesDelta};
 
+use crate::{CallbackFn, CallbackInfo};
+
 /// Floats per vertex: position (2), uv (2), color (4).
 const VERTEX_FLOATS: usize = 8;
 const VERTEX_STRIDE: u64 = (VERTEX_FLOATS * size_of::<f32>()) as u64;
@@ -11,6 +13,7 @@ const VERTEX_STRIDE: u64 = (VERTEX_FLOATS * size_of::<f32>()) as u64;
 #[derive(Debug)]
 pub struct Painter {
     pipeline: wgpu::RenderPipeline,
+    target_format: wgpu::TextureFormat,
     bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     sampler: wgpu::Sampler,
@@ -176,6 +179,7 @@ impl Painter {
 
         Self {
             pipeline,
+            target_format,
             bind_group_layout,
             uniform_buffer,
             sampler,
@@ -321,6 +325,36 @@ impl Painter {
         target_size: PhysicalSize,
         job: &PaintJob<'_>,
     ) {
+        let clear = wgpu::LoadOp::Clear(to_wgpu_color(job.clear_color));
+        self.paint_with(device, queue, encoder, target, target_size, job, clear);
+    }
+
+    /// Like [`Painter::paint`], but draws over what `target` already holds
+    /// (e.g. the application's 3D scene) instead of clearing it.
+    pub fn paint_over(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        target_size: PhysicalSize,
+        job: &PaintJob<'_>,
+    ) {
+        let load = wgpu::LoadOp::Load;
+        self.paint_with(device, queue, encoder, target, target_size, job, load);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_with(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        target_size: PhysicalSize,
+        job: &PaintJob<'_>,
+        load: wgpu::LoadOp<wgpu::Color>,
+    ) {
         let ppp = job.pixels_per_point;
         let screen_points = [
             target_size.width as f32 / ppp,
@@ -335,6 +369,27 @@ impl Painter {
         );
         self.upload_meshes(device, queue, job.meshes);
 
+        // Custom drawing first prepares, before the render pass begins.
+        let callbacks: Vec<(usize, &CallbackFn, CallbackInfo)> = job
+            .meshes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, clipped)| {
+                let paint = clipped.callback.as_ref()?;
+                let Some(callback) = paint.callback.downcast_ref::<CallbackFn>() else {
+                    log::warn!(
+                        "paint callback of an unknown type; use rustroke_render::CallbackFn"
+                    );
+                    return None;
+                };
+                let info = self.callback_info(paint.rect, clipped.clip_rect, ppp, target_size)?;
+                Some((i, callback, info))
+            })
+            .collect();
+        for (_, callback, info) in &callbacks {
+            callback.run_prepare(device, queue, encoder, info);
+        }
+
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("rustroke pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -342,21 +397,44 @@ impl Painter {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(to_wgpu_color(job.clear_color)),
+                    load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
             ..Default::default()
         });
-        if self.index_data.is_empty() {
+        if self.index_data.is_empty() && callbacks.is_empty() {
             return;
         }
-        pass.set_pipeline(&self.pipeline);
-        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        let set_ui_state = |pass: &mut wgpu::RenderPass<'_>| {
+            pass.set_pipeline(&self.pipeline);
+            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        };
+        set_ui_state(&mut pass);
 
         let (mut index_offset, mut vertex_offset) = (0u32, 0i32);
-        for clipped in job.meshes {
+        for (i, clipped) in job.meshes.iter().enumerate() {
+            if clipped.callback.is_some() {
+                if let Some((_, callback, info)) = callbacks.iter().find(|(j, ..)| *j == i) {
+                    let [x, y, w, h] = info.viewport;
+                    pass.set_viewport(x, y, w, h, 0.0, 1.0);
+                    let [cx, cy, cw, ch] = info.clip;
+                    pass.set_scissor_rect(cx, cy, cw, ch);
+                    callback.run_paint(info, &mut pass);
+                    // Back to the UI's state for the meshes that follow.
+                    pass.set_viewport(
+                        0.0,
+                        0.0,
+                        target_size.width as f32,
+                        target_size.height as f32,
+                        0.0,
+                        1.0,
+                    );
+                    set_ui_state(&mut pass);
+                }
+                continue;
+            }
             let index_count = clipped.mesh.indices.len() as u32;
             let texture = self.textures.get(&clipped.mesh.texture);
             if texture.is_none() {
@@ -376,6 +454,39 @@ impl Painter {
             index_offset += index_count;
             vertex_offset += clipped.mesh.vertices.len() as i32;
         }
+    }
+
+    /// Viewport and scissor of a callback drawing in `rect` (points),
+    /// clipped to `clip`. `None` if nothing would be visible.
+    fn callback_info(
+        &self,
+        rect: rustroke_core::Rect,
+        clip: rustroke_core::Rect,
+        ppp: f32,
+        target_size: PhysicalSize,
+    ) -> Option<CallbackInfo> {
+        let (tw, th) = (target_size.width as f32, target_size.height as f32);
+        let x0 = (rect.min.x * ppp).round().clamp(0.0, tw);
+        let y0 = (rect.min.y * ppp).round().clamp(0.0, th);
+        let x1 = (rect.max.x * ppp).round().clamp(0.0, tw);
+        let y1 = (rect.max.y * ppp).round().clamp(0.0, th);
+        if x1 <= x0 || y1 <= y0 {
+            return None;
+        }
+        let scissor = scissor_rect(clip.intersect(rect), ppp, target_size)?;
+        Some(CallbackInfo {
+            rect,
+            viewport: [x0, y0, x1 - x0, y1 - y0],
+            clip: scissor,
+            pixels_per_point: ppp,
+            target_size,
+            target_format: self.target_format,
+        })
+    }
+
+    /// Format of the textures this painter draws into.
+    pub fn target_format(&self) -> wgpu::TextureFormat {
+        self.target_format
     }
 
     /// Packs all meshes into one vertex and one index buffer, growing them

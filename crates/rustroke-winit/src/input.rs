@@ -31,6 +31,11 @@ impl std::fmt::Debug for InputCollector {
 
 impl InputCollector {
     /// Takes the events collected since the previous frame.
+    /// Last known pointer position, in points.
+    pub(crate) fn pointer(&self) -> Option<Point> {
+        self.pointer
+    }
+
     pub(crate) fn take_events(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.events)
     }

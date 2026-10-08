@@ -1,6 +1,7 @@
 //! Desktop integration: window creation and the event loop, built on winit.
 
 mod input;
+mod integration;
 pub mod testing;
 
 use std::fmt;
@@ -15,11 +16,15 @@ use rustroke_render::{PaintJob, RenderOutcome, Renderer, RendererError};
 
 /// The wgpu version rustroke uses (for [`Frame::wgpu`] and native textures):
 /// use these types so the application and rustroke share one GPU device.
-pub use rustroke_render::wgpu;
+pub use integration::{EventResponse, Integration, RunOutput};
+pub use rustroke_render::{CallbackFn, CallbackInfo, wgpu};
 use rustroke_text::{Fonts, TextStyle};
 use rustroke_widgets::{
     CentralPanel, Context, CursorIcon, RepaintHandle, TextureHandle, Ui, UiRoot,
 };
+/// The winit version rustroke uses, for applications with their own event
+/// loop ([`Integration`]).
+pub use winit;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
@@ -85,6 +90,12 @@ impl Frame<'_> {
     /// in the same frame.
     pub fn wgpu(&self) -> Option<(&wgpu::Device, &wgpu::Queue)> {
         self.renderer.as_deref().map(|r| (r.device(), r.queue()))
+    }
+
+    /// Format of the window's render target, for pipelines of
+    /// `rustroke_render::CallbackFn`s. `None` without a window.
+    pub fn wgpu_target_format(&self) -> Option<wgpu::TextureFormat> {
+        self.renderer.as_deref().map(|r| r.target_format())
     }
 
     /// Shows an application-owned wgpu texture as an image, without copying
