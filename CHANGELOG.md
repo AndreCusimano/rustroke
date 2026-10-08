@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-09
+
+### Added
+
+- **More native windows**: `Frame::show_window(id, WindowOptions)`, called
+  from the main window's `update` every frame the window should exist,
+  keeps an extra native window open (e.g. an assembly view on a second
+  monitor); it closes when a frame stops asking for it. Its content comes
+  from the new `App::update_window(id, frame)`, and
+  `App::on_window_close_requested(id)` handles its close button. Each
+  window has its own context and renderer; fonts and icons are shared, and
+  input in one window redraws the others (shared app state).
+  `Frame::window_id()` tells which window a frame is for.
+- `testing::Harness::requested_windows()` and `run_window(app, id)`.
+- `TextureAtlas::revision()` and `dirty_base()`: several renderers can
+  share one atlas (a renderer that missed changes uploads it whole).
+- New example: `windows`.
+
 ## [0.6.0] — 2026-10-09
 
 ### Added
@@ -233,7 +251,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/AndreCusimano/rustroke/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AndreCusimano/rustroke/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AndreCusimano/rustroke/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AndreCusimano/rustroke/compare/v0.3.0...v0.4.0

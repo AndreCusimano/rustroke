@@ -216,6 +216,8 @@ impl Integration {
             ctx: &mut self.ctx,
             renderer: None,
             title: None,
+            windows: Vec::new(),
+            window_id: None,
         };
         add(&mut frame);
         let Frame {

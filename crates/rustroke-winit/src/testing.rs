@@ -34,9 +34,9 @@ use rustroke_core::{
 };
 use rustroke_render::{OffscreenRenderer, PaintJob, RendererError};
 use rustroke_text::Fonts;
-use rustroke_widgets::{Context, FrameOutput, WidgetDescription};
+use rustroke_widgets::{Context, FrameOutput, Id, WidgetDescription};
 
-use crate::{App, Frame};
+use crate::{App, Frame, WindowOptions};
 
 /// A window-less host for an [`App`]. See the [module docs](self).
 pub struct Harness {
@@ -54,6 +54,10 @@ pub struct Harness {
     /// `TexturesDelta` only has the changes).
     textures: Vec<(TextureId, ColorImage)>,
     renderer: Option<OffscreenRenderer>,
+    /// Extra windows requested by the last frame.
+    windows: Vec<(Id, WindowOptions)>,
+    /// The UI state of each extra window.
+    window_contexts: Vec<(Id, Context)>,
 }
 
 impl std::fmt::Debug for Harness {
@@ -128,6 +132,8 @@ impl Harness {
             frames: 0,
             textures: Vec::new(),
             renderer: None,
+            windows: Vec::new(),
+            window_contexts: Vec::new(),
         }
     }
 
@@ -173,14 +179,18 @@ impl Harness {
             ctx: &mut self.ctx,
             renderer: None,
             title: None,
+            windows: Vec::new(),
+            window_id: None,
         };
         app.update(&mut frame);
         let Frame {
             mut shapes,
             clear_color,
             title,
+            windows,
             ..
         } = frame;
+        self.windows = windows;
         self.clear_color = clear_color;
         if title.is_some() {
             self.title = title;
@@ -249,6 +259,50 @@ impl Harness {
             modifiers,
         };
         self.run_with_events(app, vec![event(true), event(false)]);
+    }
+
+    /// The extra windows the last frame asked for (see
+    /// [`Frame::show_window`]).
+    pub fn requested_windows(&self) -> &[(Id, WindowOptions)] {
+        &self.windows
+    }
+
+    /// Runs one frame of extra window `id` ([`App::update_window`]), with
+    /// that window's own context, and returns its widgets.
+    pub fn run_window(&mut self, app: &mut impl App, id: Id) -> Vec<WidgetDescription> {
+        self.time += 1.0 / 60.0;
+        let index = match self.window_contexts.iter().position(|(w, _)| *w == id) {
+            Some(i) => i,
+            None => {
+                self.window_contexts.push((id, Context::new()));
+                self.window_contexts.len() - 1
+            }
+        };
+        let ctx = &mut self.window_contexts[index].1;
+        ctx.begin_frame(RawInput {
+            time: self.time,
+            screen_rect: self.screen_rect,
+            pixels_per_point: self.pixels_per_point,
+            events: Vec::new(),
+        });
+        let mut frame = Frame {
+            time: Duration::from_secs_f64(self.time),
+            screen_rect: self.screen_rect,
+            pixels_per_point: self.pixels_per_point,
+            shapes: DisplayList::new(),
+            clear_color: self.clear_color,
+            request_repaint: false,
+            fonts: &mut self.fonts,
+            ctx: &mut *ctx,
+            renderer: None,
+            title: None,
+            windows: Vec::new(),
+            window_id: Some(id),
+        };
+        app.update_window(id, &mut frame);
+        self.fonts.end_frame();
+        ctx.end_frame();
+        ctx.widgets().to_vec()
     }
 
     /// The widgets of the last frame.
@@ -438,6 +492,64 @@ mod tests {
         let path = std::env::temp_dir().join("rustroke_harness_render.png");
         image.save_png(&path).unwrap();
         assert!(std::fs::metadata(&path).unwrap().len() > 100);
+    }
+
+    struct TwoWindows {
+        show_assembly: bool,
+        clicks: u32,
+    }
+
+    impl App for TwoWindows {
+        fn update(&mut self, frame: &mut Frame<'_>) {
+            if self.show_assembly {
+                frame.show_window(
+                    Id::new("assembly"),
+                    WindowOptions {
+                        title: "Assembly".into(),
+                        ..WindowOptions::default()
+                    },
+                );
+            }
+            frame.ui(|ui| ui.checkbox(&mut self.show_assembly, "Show assembly"));
+        }
+
+        fn update_window(&mut self, id: Id, frame: &mut Frame<'_>) {
+            assert_eq!(frame.window_id(), Some(id));
+            frame.ui(|ui| {
+                if ui.button("Explode").clicked() {
+                    self.clicks += 1;
+                }
+            });
+        }
+
+        fn on_window_close_requested(&mut self, _id: Id) -> bool {
+            self.show_assembly = false;
+            true
+        }
+    }
+
+    /// LAY-05: an app keeps extra windows open by asking for them.
+    #[test]
+    fn extra_windows_are_requested_and_drawn() {
+        let mut app = TwoWindows {
+            show_assembly: false,
+            clicks: 0,
+        };
+        let mut h = Harness::new();
+        h.run(&mut app);
+        assert!(h.requested_windows().is_empty());
+        assert!(h.click(&mut app, "Show assembly"));
+        let requested = h.requested_windows();
+        assert_eq!(requested.len(), 1);
+        assert_eq!(requested[0].1.title, "Assembly");
+        let id = requested[0].0;
+        let widgets = h.run_window(&mut app, id);
+        assert!(widgets.iter().any(|w| w.info.label == "Explode"));
+        assert!(h.find("Explode").is_none(), "not in the main window");
+
+        assert!(app.on_window_close_requested(id));
+        h.run(&mut app);
+        assert!(h.requested_windows().is_empty(), "closed for good");
     }
 
     #[test]

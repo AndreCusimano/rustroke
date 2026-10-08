@@ -114,13 +114,16 @@
 //!   [`RepaintHandle`] that wakes the UI up from any thread.
 //! - **Window**: [`Frame::set_title`]; [`App::on_close_requested`] can keep
 //!   the window open (e.g. to ask about unsaved changes).
+//! - **More windows**: keep extra native windows open with
+//!   [`Frame::show_window`] (e.g. a view on a second monitor) and draw
+//!   them in [`App::update_window`].
 //! - **Testing**: [`testing::Harness`] runs your app without a window;
 //!   click widgets by label, type text, press keys, inspect
 //!   [`Context::widgets`] and render the frame to an image.
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
-//! `docking`, `files`, `custom_wgpu`, `integration`, `layout`,
+//! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
 //!

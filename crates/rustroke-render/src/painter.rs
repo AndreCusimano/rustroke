@@ -24,6 +24,8 @@ pub struct Painter {
     /// Reused CPU staging memory.
     vertex_data: Vec<f32>,
     index_data: Vec<u32>,
+    /// Atlas revision on the GPU (`None`: nothing uploaded yet).
+    atlas_revision: Option<u64>,
 }
 
 /// A texture on the GPU and the bind group that samples it.
@@ -198,6 +200,7 @@ impl Painter {
             ),
             vertex_data: Vec::new(),
             index_data: Vec::new(),
+            atlas_revision: None,
         }
     }
 
@@ -209,19 +212,28 @@ impl Painter {
         atlas: &mut TextureAtlas,
     ) {
         let size = atlas.size();
-        if self.textures[&TextureId::Atlas].owned().width() != size {
+        let resized = self.textures[&TextureId::Atlas].owned().width() != size;
+        if resized {
             let texture = create_texture(device, "rustroke atlas", size, size);
             self.insert_texture(device, TextureId::Atlas, texture);
-            // New texture: everything must be uploaded.
-            atlas.take_dirty();
-            let texture = self.textures[&TextureId::Atlas].owned();
-            upload_atlas_region(queue, texture, atlas, 0, 0, size, size);
+        }
+        let base = atlas.dirty_base();
+        let dirty = atlas.take_dirty();
+        let revision = atlas.revision();
+        if !resized && self.atlas_revision == Some(revision) {
             return;
         }
-        if let Some(r) = atlas.take_dirty() {
-            let texture = self.textures[&TextureId::Atlas].owned();
-            upload_atlas_region(queue, texture, atlas, r.x, r.y, r.width, r.height);
+        let texture = self.textures[&TextureId::Atlas].owned();
+        match dirty {
+            // Only what changed since this painter's last upload.
+            Some(r) if !resized && self.atlas_revision == Some(base) => {
+                upload_atlas_region(queue, texture, atlas, r.x, r.y, r.width, r.height);
+            }
+            // A new texture, or changes another painter (window) already
+            // took: upload everything.
+            _ => upload_atlas_region(queue, texture, atlas, 0, 0, size, size),
         }
+        self.atlas_revision = Some(revision);
     }
 
     /// Creates the user textures in `delta.set`. Call before painting.

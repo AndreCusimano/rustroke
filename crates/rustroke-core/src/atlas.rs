@@ -29,6 +29,10 @@ pub struct TextureAtlas {
     cursor_y: u32,
     shelf_height: u32,
     dirty: Option<AtlasRegion>,
+    /// Counts changes, so several renderers can share the atlas.
+    revision: u64,
+    /// The revision at the last [`TextureAtlas::take_dirty`].
+    dirty_base: u64,
 }
 
 /// Empty texels kept between packed images so linear filtering does not
@@ -55,6 +59,8 @@ impl TextureAtlas {
             cursor_y: 0,
             shelf_height: 0,
             dirty: None,
+            revision: 0,
+            dirty_base: 0,
         };
         let white = atlas
             .allocate(WHITE_SIZE, WHITE_SIZE)
@@ -128,11 +134,29 @@ impl TextureAtlas {
             width: new_size,
             height: new_size,
         });
+        self.revision += 1;
     }
 
     /// Removes everything except the white block, keeping the size.
     pub fn clear(&mut self) {
+        let revision = self.revision;
         *self = Self::new(self.size);
+        self.revision = revision + 1;
+        self.dirty_base = 0;
+    }
+
+    /// Increases with every change of the pixels (or size). A renderer that
+    /// uploaded revision `r` is up to date while this is still `r`.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The revision the next [`TextureAtlas::take_dirty`] region starts
+    /// from: a renderer that already uploaded this revision can upload
+    /// just the region; others (e.g. a second window sharing the atlas)
+    /// must upload everything.
+    pub fn dirty_base(&self) -> u64 {
+        self.dirty_base
     }
 
     /// Copies `data` (row-major, `region.width * region.height` texels)
@@ -149,11 +173,13 @@ impl TextureAtlas {
             self.pixels[start..start + width].copy_from_slice(src);
         }
         self.mark_dirty(region);
+        self.revision += 1;
     }
 
     /// Returns the area changed since the last call, if any. The renderer
     /// uses this to upload only what changed.
     pub fn take_dirty(&mut self) -> Option<AtlasRegion> {
+        self.dirty_base = self.revision;
         self.dirty.take()
     }
 
@@ -257,5 +283,28 @@ mod tests {
             (d.x + d.width, d.y + d.height),
             (b.x + b.width, b.y + b.height)
         );
+    }
+
+    #[test]
+    fn revisions_let_several_renderers_share_the_atlas() {
+        let mut atlas = TextureAtlas::new(64);
+        // Renderer A uploads everything.
+        atlas.take_dirty();
+        let a = atlas.revision();
+        let b = atlas.revision();
+        let r = atlas.allocate(4, 4).unwrap();
+        atlas.write(r, &[[255; 4]; 16]);
+        assert!(atlas.revision() > a);
+        // A takes the change: it was up to date at the base, so the
+        // region is enough.
+        assert_eq!(atlas.dirty_base(), a);
+        assert_eq!(atlas.take_dirty(), Some(r));
+        // B missed it: nothing is dirty any more, and its revision is not
+        // the base, so it must upload everything.
+        assert_eq!(atlas.take_dirty(), None);
+        assert_ne!(atlas.dirty_base(), b);
+        let before = atlas.revision();
+        atlas.clear();
+        assert!(atlas.revision() > before, "clearing is a change too");
     }
 }
