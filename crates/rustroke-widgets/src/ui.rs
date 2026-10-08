@@ -6,7 +6,9 @@ use rustroke_core::{Color, DisplayList, Galley, InputState, Point, Rect, Vec2};
 use rustroke_text::{Fonts, TextStyle};
 
 use crate::grid::GridLayout;
-use crate::widgets::{Button, Checkbox, Label, Numeric, RadioButton, Separator, Slider, Widget};
+use crate::widgets::{
+    Button, Checkbox, Label, Numeric, RadioButton, SelectableLabel, Separator, Slider, Widget,
+};
 use crate::{Align, Context, Direction, Id, LayerId, Layout, Response, Sense, Style};
 
 /// The result of a closure that added widgets to a child [`Ui`], plus a
@@ -698,6 +700,39 @@ impl<'a> Ui<'a> {
         response
     }
 
+    /// Text highlighted when `selected`; returns a response that is
+    /// clicked when chosen.
+    pub fn selectable_label(&mut self, selected: bool, text: impl Into<String>) -> Response {
+        self.add(SelectableLabel::new(selected, text))
+    }
+
+    /// A [`SelectableLabel`] that sets `current` to `value` when clicked
+    /// (list items, combo box options).
+    pub fn selectable_value<V: PartialEq>(
+        &mut self,
+        current: &mut V,
+        value: V,
+        text: impl Into<String>,
+    ) -> Response {
+        let mut response = self.selectable_label(*current == value, text);
+        if response.clicked() && *current != value {
+            *current = value;
+            response.mark_changed();
+        }
+        response
+    }
+
+    /// A number edited by dragging or typing (see [`crate::DragValue`] for
+    /// options).
+    pub fn drag_value<T: Numeric>(&mut self, value: &mut T) -> Response {
+        self.add(crate::DragValue::new(value))
+    }
+
+    /// A rotating activity indicator.
+    pub fn spinner(&mut self) -> Response {
+        self.add(crate::Spinner::new())
+    }
+
     /// Shows an image at one point per pixel (see [`crate::Image`] for options).
     pub fn image(&mut self, texture: &crate::TextureHandle) -> Response {
         self.add(crate::Image::new(texture))
@@ -737,7 +772,7 @@ impl<'a> Ui<'a> {
         let inner = self
             .ctx
             .is_popup_open(id)
-            .then(|| crate::popup::show_popup(self, id, response.rect, add_contents));
+            .then(|| crate::popup::show_popup(self, id, response.rect, 0.0, add_contents));
         InnerResponse { inner, response }
     }
 

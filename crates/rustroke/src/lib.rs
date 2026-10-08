@@ -59,7 +59,9 @@
 //! # Guide
 //!
 //! - **Widgets**: [`Ui::label`], [`Ui::button`], [`Ui::checkbox`],
-//!   [`Ui::radio_value`], [`Slider`], [`TextEdit`], [`Image`],
+//!   [`Ui::radio_value`], [`Ui::selectable_value`], [`Slider`],
+//!   [`DragValue`] (drag or type a number), [`ComboBox`] (drop-down list),
+//!   [`TextEdit`], [`Image`], [`ProgressBar`], [`Spinner`],
 //!   [`Ui::separator`]; any widget can be disabled with
 //!   [`Ui::add_enabled`]. Implement [`Widget`] for your own.
 //! - **Layout**: a [`Ui`] stacks widgets top to bottom. Use
@@ -67,11 +69,20 @@
 //!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables.
 //! - **Containers**: [`Panel`] (top/bottom/left/right bars), the central
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
-//!   [`ScrollArea`], popup menus ([`Ui::menu_button`]) and tooltips
-//!   ([`Response::on_hover_text`]). Show panels before the central area.
+//!   [`ScrollArea`], popup menus ([`Ui::menu_button`]), context menus
+//!   ([`Response::context_menu`]), collapsible sections and trees
+//!   ([`CollapsingHeader`]) and tooltips ([`Response::on_hover_text`]).
+//!   Show panels before the central area.
+//! - **Mouse and keyboard**: [`Response`] reports clicks and drags per
+//!   button ([`Response::secondary_clicked`], [`Response::dragged_by`]);
+//!   shortcuts are [`KeyboardShortcut`]s checked with
+//!   [`InputState::consume_shortcut`] and shown in menus with
+//!   [`Button::shortcut_text`]. Skip them while
+//!   [`Context::wants_keyboard_input`] (the user is typing).
 //! - **Text**: all text uses the bundled Inter font, with system fonts as
 //!   fallback for other scripts and emoji. Fields support selection,
-//!   clipboard and input methods (IME).
+//!   clipboard and input methods (IME); Escape cancels an edit and
+//!   [`Response::lost_focus_reason`] tells why editing ended.
 //! - **Style**: [`Style::dark`] / [`Style::light`], changed at runtime with
 //!   [`Context::set_style`] or locally with [`Ui::style_mut`]. Hover and
 //!   press colors animate.
@@ -94,8 +105,9 @@
 //!   [`Context::widgets`].
 //!
 //! The `examples/` directory has a runnable demo for each topic:
-//! `cargo run -p rustroke --example widgets` (and `layout`, `containers`,
-//! `text_input`, `themes`, `extras`, `text`, `shapes`, `hello`).
+//! `cargo run -p rustroke --example widgets` (and `properties`, `layout`,
+//! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
+//! `hello`).
 //!
 //! # Crates
 //!
@@ -105,17 +117,18 @@
 //! API) and `rustroke-winit` (window and event loop).
 
 pub use rustroke_core::{
-    Color, ColorImage, DisplayList, Event, Galley, ImeEvent, InputState, Key, Modifiers,
-    POINTS_PER_SCROLL_LINE, Point, PointerButton, RawInput, Rect, Shape, Stroke, TextureId,
-    TexturesDelta, Vec2, point, vec2,
+    Color, ColorImage, DisplayList, Event, Galley, ImeEvent, InputState, Key, KeyboardShortcut,
+    Modifiers, POINTS_PER_SCROLL_LINE, Point, PointerButton, RawInput, Rect, Shape, Stroke,
+    TextureId, TexturesDelta, Vec2, point, vec2,
 };
 pub use rustroke_text::{FontFamily, Fonts, TextStyle};
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
-    Align, Button, CentralPanel, Checkbox, Context, CursorIcon, Direction, FrameOutput, Grid, Id,
-    InnerResponse, Label, LayerId, Layout, Numeric, Order, Panel, PanelSide, RadioButton,
-    RepaintHandle, Response, ScrollArea, Sense, Separator, Slider, Style, TextEdit, TextureHandle,
-    Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
+    Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, ComboBox, Context,
+    CursorIcon, Direction, DragValue, FocusLost, FrameOutput, Grid, Id, InnerResponse, Label,
+    LayerId, Layout, Numeric, Order, Panel, PanelSide, ProgressBar, RadioButton, RepaintHandle,
+    Response, ScrollArea, SelectableLabel, Sense, Separator, Slider, Spinner, Style, TextEdit,
+    TextureHandle, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
 };
 pub use rustroke_winit::{App, Frame, RunError, WindowOptions, run, testing, wgpu};
 

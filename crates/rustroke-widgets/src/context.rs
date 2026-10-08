@@ -68,6 +68,13 @@ impl Sense {
     }
 }
 
+/// All pointer buttons, in the order presses are looked for.
+const BUTTONS: [PointerButton; 3] = [
+    PointerButton::Primary,
+    PointerButton::Secondary,
+    PointerButton::Middle,
+];
+
 /// Paint and hit-test order of layers, back to front.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Order {
@@ -121,6 +128,14 @@ pub enum CursorIcon {
     ResizeHorizontal,
     /// Resize diagonally (bottom-right corner).
     ResizeNwSe,
+    /// Resize vertically.
+    ResizeVertical,
+    /// A crosshair, for precise picking and drawing.
+    Crosshair,
+    /// Four arrows: something can be moved (e.g. panning a view).
+    Move,
+    /// The action is not allowed here.
+    NotAllowed,
 }
 
 /// What the platform layer should draw and do after a frame.
@@ -294,6 +309,8 @@ struct FrameState {
     hover_tracked: bool,
     /// Widget descriptions for screen readers (only while active).
     described: Vec<WidgetDescription>,
+    /// The focused widget takes keyboard input (a text field).
+    keyboard_owner: Option<Id>,
 }
 
 impl Default for FrameState {
@@ -308,6 +325,7 @@ impl Default for FrameState {
             output: FrameOutput::default(),
             hover_tracked: false,
             described: Vec::new(),
+            keyboard_owner: None,
         }
     }
 }
@@ -329,8 +347,10 @@ impl std::fmt::Debug for DataMap {
 pub struct Context {
     input: InputState,
     style: Arc<Style>,
-    /// Widget the primary button was pressed on, until it is released.
+    /// Widget a pointer button was pressed on, until it is released.
     active: Option<Id>,
+    /// The button that made `active` active.
+    active_button: PointerButton,
     /// The primary button was pressed on empty space and is still down:
     /// no widget should react until it is released.
     pressed_on_background: bool,
@@ -367,6 +387,7 @@ impl Default for Context {
             input: InputState::default(),
             style: Arc::new(Style::default()),
             active: None,
+            active_button: PointerButton::Primary,
             pressed_on_background: false,
             focused: None,
             focus_visible: false,
@@ -499,6 +520,11 @@ impl Context {
         self.data.0.insert(id, Box::new(value));
     }
 
+    /// Forgets the state stored for `id`.
+    pub fn remove_data(&mut self, id: Id) {
+        self.data.0.remove(&id);
+    }
+
     /// Runs another frame right after this one.
     pub fn request_repaint(&mut self) {
         self.this_frame.output.repaint = true;
@@ -524,6 +550,28 @@ impl Context {
     /// Removes keyboard focus from whatever widget has it.
     pub fn clear_focus(&mut self) {
         self.focused = None;
+    }
+
+    /// Gives keyboard focus to widget `id` (e.g. a text field when a
+    /// dialog opens). Takes effect this frame for widgets added after the
+    /// call, otherwise in the next one.
+    pub fn request_focus(&mut self, id: Id) {
+        self.focused = Some(id);
+        self.focus_visible = false;
+    }
+
+    /// A text field has keyboard focus: the app should not treat key
+    /// presses as shortcuts (e.g. a bare "Delete" or letter keys).
+    pub fn wants_keyboard_input(&self) -> bool {
+        self.focused.is_some_and(|id| {
+            self.this_frame.keyboard_owner == Some(id) || self.prev_frame.keyboard_owner == Some(id)
+        })
+    }
+
+    /// Marks the focused widget `id` as taking keyboard input, so Escape
+    /// is left to it and [`Context::wants_keyboard_input`] is true.
+    pub(crate) fn set_keyboard_owner(&mut self, id: Id) {
+        self.this_frame.keyboard_owner = Some(id);
     }
 
     /// Mouse cursor to show for this frame (the last call wins).
@@ -565,13 +613,17 @@ impl Context {
                     self.pressed_on_background = true;
                 }
             }
-            if let Some(popup) = self.open_popup {
-                let in_popup = self
-                    .hit
-                    .is_some_and(|h| h.layer == popup_layer(popup) || h.id == popup);
-                if !in_popup {
-                    self.open_popup = None;
-                }
+        }
+        // Any button pressed outside the open popup (and its opener) closes it.
+        let any_pressed = BUTTONS
+            .into_iter()
+            .any(|b| self.input.pointer.pressed_at(b).is_some());
+        if any_pressed && let Some(popup) = self.open_popup {
+            let in_popup = self
+                .hit
+                .is_some_and(|h| h.layer == popup_layer(popup) || h.id == popup);
+            if !in_popup {
+                self.open_popup = None;
             }
         }
 
@@ -592,7 +644,12 @@ impl Context {
         if self.input.consume_key(Key::Tab, Modifiers::SHIFT) {
             self.move_focus(false);
         }
-        if self.input.consume_key(Key::Escape, Modifiers::NONE) {
+        // Escape closes the open popup; otherwise it leaves the focused
+        // widget, except text fields, which handle it themselves (cancel).
+        let text_focused = self.focused.is_some() && self.focused == self.prev_frame.keyboard_owner;
+        if (self.open_popup.is_some() || !text_focused)
+            && self.input.consume_key(Key::Escape, Modifiers::NONE)
+        {
             if self.open_popup.is_some() {
                 self.open_popup = None;
             } else {
@@ -605,7 +662,8 @@ impl Context {
     /// and tells the platform layer what to do next.
     pub fn end_frame(&mut self) -> FrameOutput {
         let seen = &self.this_frame.seen;
-        if !self.input.pointer.primary_down() || self.active.is_some_and(|id| !seen.contains(&id)) {
+        let active_button_down = self.input.pointer.is_down(self.active_button);
+        if !active_button_down || self.active.is_some_and(|id| !seen.contains(&id)) {
             self.active = None;
         }
         if !self.input.pointer.primary_down() {
@@ -739,29 +797,41 @@ impl Context {
         response.hovered = over && !covered && !other_active;
 
         if sense.interactive() {
-            if response.hovered && pointer.primary_pressed() {
+            // A press of any button starts an interaction with the widget
+            // under the pointer; it lasts until that button is released.
+            let pressed = BUTTONS
+                .into_iter()
+                .find(|b| pointer.pressed_at(*b).is_some());
+            if let (true, Some(button)) = (response.hovered, pressed) {
                 self.active = Some(id);
-                response.drag_started = sense.drag;
-                if sense.focusable {
+                self.active_button = button;
+                let primary = button == PointerButton::Primary;
+                response.drag_started = sense.drag && primary;
+                if primary && sense.focusable {
                     self.focused = Some(id);
                     self.focus_visible = false;
                 }
             }
             if self.active == Some(id) {
-                if let Some(pos) = pointer.released_at(PointerButton::Primary) {
-                    response.clicked = sense.click && visible.contains(pos);
-                    response.drag_stopped = sense.drag;
-                } else if pointer.primary_down() {
-                    response.pressed = true;
+                let button = self.active_button;
+                let primary = button == PointerButton::Primary;
+                if let Some(pos) = pointer.released_at(button) {
+                    if sense.click && visible.contains(pos) {
+                        response.clicked_by = Some(button);
+                        response.clicked = primary;
+                    }
+                    response.drag_stopped = sense.drag && primary;
+                } else if pointer.is_down(button) {
+                    response.pressed = primary;
                     if sense.drag {
-                        response.dragged = true;
+                        response.dragged = primary;
+                        response.drag_button = Some(button);
                         // On the press frame only the movement after the press
                         // counts; earlier movement is not part of the drag.
-                        response.drag_delta =
-                            match (pointer.pressed_at(PointerButton::Primary), pointer.pos()) {
-                                (Some(start), Some(now)) => now - start,
-                                _ => pointer.delta(),
-                            };
+                        response.drag_delta = match (pointer.pressed_at(button), pointer.pos()) {
+                            (Some(start), Some(now)) => now - start,
+                            _ => pointer.delta(),
+                        };
                     }
                 }
             }
@@ -875,6 +945,12 @@ impl Context {
     /// Closes the open popup, if any.
     pub fn close_popup(&mut self) {
         self.open_popup = None;
+    }
+
+    /// Marks `id` as used this frame (things that are not widgets but must
+    /// not be forgotten, e.g. an open context menu).
+    pub(crate) fn keep_alive(&mut self, id: Id) {
+        self.this_frame.seen.push(id);
     }
 
     // ---- Helpers ----

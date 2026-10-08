@@ -43,6 +43,8 @@ pub struct Spacing {
     pub window_padding: f32,
     /// Width of scroll bars.
     pub scrollbar_width: f32,
+    /// Horizontal shift of nested content (collapsible sections, trees).
+    pub indent: f32,
 }
 
 impl Default for Spacing {
@@ -57,6 +59,7 @@ impl Default for Spacing {
             window_margin: 16.0,
             window_padding: 10.0,
             scrollbar_width: 8.0,
+            indent: 18.0,
         }
     }
 }

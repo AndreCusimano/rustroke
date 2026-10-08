@@ -81,13 +81,16 @@ fn main() -> Result<(), rustroke::RunError> {
 
 ## Features
 
-- **Widgets**: labels, buttons, checkboxes, radio buttons, sliders, single and
-  multi-line text fields (selection, clipboard, word navigation, input methods
-  for accented and Asian text), images, separators. Any widget can be disabled.
+- **Widgets**: labels, buttons, checkboxes, radio buttons, selectable labels,
+  sliders, drag values (drag or type a number), combo boxes, progress bars,
+  spinners, single and multi-line text fields (selection, clipboard, word
+  navigation, input methods for accented and Asian text), images, separators.
+  Any widget can be disabled.
 - **Layout**: rows, columns, alignment, wrapping, fixed-size widgets, grids
   with aligned columns.
 - **Containers**: top/bottom/side panels (resizable), movable and resizable
-  windows, scroll areas, popup menus, tooltips.
+  windows, scroll areas, popup and context menus, collapsible sections and
+  trees, tooltips.
 - **Text**: shaping, bidirectional text and wrapping via cosmic-text. The Inter
   font is bundled; system fonts are used for emoji and other scripts.
 - **Drawing**: anti-aliased rectangles (rounded), circles, lines, polygons,
@@ -96,7 +99,8 @@ fn main() -> Result<(), rustroke::RunError> {
   changeable at runtime.
 - **Accessibility**: screen readers (VoiceOver, Narrator, Orca) through
   AccessKit.
-- **Keyboard**: Tab navigation, Enter/Space activation, arrow keys on sliders.
+- **Mouse and keyboard**: clicks and drags with any button, Tab navigation,
+  Enter/Space activation, arrow keys, keyboard shortcuts shown in menus.
 - **Your own GPU rendering**: render a 3D viewport (or anything) with wgpu
   into your own texture and show it in the UI without copies.
 - **Testing**: run your app without a window, click widgets by label, type
@@ -118,6 +122,7 @@ Desktop: macOS, Windows, Linux. Minimum Rust version: 1.89.
 
 ```sh
 cargo run -p rustroke --example widgets     # buttons, checkboxes, radios, sliders, keyboard focus
+cargo run -p rustroke --example properties  # tree, property panel, combo boxes, drag values, shortcuts
 cargo run -p rustroke --example layout      # rows, alignment, wrapping, grids
 cargo run -p rustroke --example containers  # menus, panels, windows, scroll areas, tooltips
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
@@ -167,7 +172,7 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.1: the core is complete and tested (interaction tests without a
+Version 0.3: the core is complete and tested (interaction tests without a
 window, GPU snapshot tests, CI on macOS, Windows and Linux). Known limitations
 are listed in the [changelog](CHANGELOG.md). Coming next: extending and
 customizing shapes, and a visual screen designer built with Rustroke itself.

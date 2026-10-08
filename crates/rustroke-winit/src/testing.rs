@@ -141,15 +141,27 @@ impl Harness {
     /// last frame), then runs another frame so the app reacts to the
     /// click. Returns `false` if there is no such widget.
     pub fn click(&mut self, app: &mut impl App, label: &str) -> bool {
+        self.click_with(app, label, PointerButton::Primary)
+    }
+
+    /// Like [`Harness::click`] with the secondary (right) button, e.g. to
+    /// open a context menu.
+    pub fn right_click(&mut self, app: &mut impl App, label: &str) -> bool {
+        self.click_with(app, label, PointerButton::Secondary)
+    }
+
+    /// Like [`Harness::click`] with any mouse button.
+    pub fn click_with(&mut self, app: &mut impl App, label: &str, button: PointerButton) -> bool {
         if self.frames == 0 {
             self.run(app);
         }
         let Some(pos) = self.find(label).map(|w| w.rect.center()) else {
             return false;
         };
+        let which = button;
         let button = |pressed| Event::PointerButton {
             pos,
-            button: PointerButton::Primary,
+            button: which,
             pressed,
             modifiers: Modifiers::NONE,
         };
@@ -280,5 +292,37 @@ mod tests {
         assert!(app.on_close_requested());
         assert!(!h.click(&mut app, "Missing"));
         assert!(h.widgets().len() >= 3);
+    }
+
+    #[test]
+    fn context_menus_and_combo_boxes_by_label() {
+        let mut deleted = false;
+        let mut axis = "X";
+        let mut app = |frame: &mut Frame| {
+            frame.ui(|ui| {
+                ui.button("Shaft").context_menu(ui, |ui| {
+                    if ui.button("Delete").clicked() {
+                        deleted = true;
+                    }
+                });
+                rustroke_widgets::ComboBox::from_label("Axis")
+                    .selected_text(axis)
+                    .show_ui(ui, |ui| {
+                        for a in ["X", "Y", "Z"] {
+                            ui.selectable_value(&mut axis, a, a);
+                        }
+                    });
+            });
+        };
+        let mut h = Harness::new();
+        assert!(h.right_click(&mut app, "Shaft"));
+        h.run(&mut app);
+        assert!(h.click(&mut app, "Delete"));
+        assert!(h.click(&mut app, "Axis"));
+        h.run(&mut app);
+        assert!(h.click(&mut app, "Z"));
+        drop(app);
+        assert!(deleted);
+        assert_eq!(axis, "Z");
     }
 }

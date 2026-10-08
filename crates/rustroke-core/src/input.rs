@@ -62,19 +62,192 @@ pub enum Key {
     PageUp,
     /// Page Down.
     PageDown,
-    // Letters used by shortcuts (typed text arrives as `Event::Text`).
-    /// The A key (select all with Cmd/Ctrl).
+    // Letters, digits and other keys, mainly for shortcuts: typed text
+    // arrives as `Event::Text`, not as keys.
+    /// The A key.
     A,
-    /// The C key (copy with Cmd/Ctrl).
+    /// The B key.
+    B,
+    /// The C key.
     C,
-    /// The V key (paste with Cmd/Ctrl).
+    /// The D key.
+    D,
+    /// The E key.
+    E,
+    /// The F key.
+    F,
+    /// The G key.
+    G,
+    /// The H key.
+    H,
+    /// The I key.
+    I,
+    /// The J key.
+    J,
+    /// The K key.
+    K,
+    /// The L key.
+    L,
+    /// The M key.
+    M,
+    /// The N key.
+    N,
+    /// The O key.
+    O,
+    /// The P key.
+    P,
+    /// The Q key.
+    Q,
+    /// The R key.
+    R,
+    /// The S key.
+    S,
+    /// The T key.
+    T,
+    /// The U key.
+    U,
+    /// The V key.
     V,
-    /// The X key (cut with Cmd/Ctrl).
+    /// The W key.
+    W,
+    /// The X key.
     X,
-    /// The Y key (redo on some platforms).
+    /// The Y key.
     Y,
-    /// The Z key (undo with Cmd/Ctrl).
+    /// The Z key.
     Z,
+    /// The 0 key (main row).
+    Num0,
+    /// The 1 key (main row).
+    Num1,
+    /// The 2 key (main row).
+    Num2,
+    /// The 3 key (main row).
+    Num3,
+    /// The 4 key (main row).
+    Num4,
+    /// The 5 key (main row).
+    Num5,
+    /// The 6 key (main row).
+    Num6,
+    /// The 7 key (main row).
+    Num7,
+    /// The 8 key (main row).
+    Num8,
+    /// The 9 key (main row).
+    Num9,
+    /// The F1 function key.
+    F1,
+    /// The F2 function key.
+    F2,
+    /// The F3 function key.
+    F3,
+    /// The F4 function key.
+    F4,
+    /// The F5 function key.
+    F5,
+    /// The F6 function key.
+    F6,
+    /// The F7 function key.
+    F7,
+    /// The F8 function key.
+    F8,
+    /// The F9 function key.
+    F9,
+    /// The F10 function key.
+    F10,
+    /// The F11 function key.
+    F11,
+    /// The F12 function key.
+    F12,
+    /// The `-` key.
+    Minus,
+    /// The `=` / `+` key.
+    Equals,
+}
+
+impl Key {
+    /// How the key is shown in shortcut hints ("A", "F5", "⌫" on macOS).
+    pub fn symbol(self) -> &'static str {
+        if cfg!(target_os = "macos") {
+            match self {
+                Self::Enter => return "⏎",
+                Self::Backspace => return "⌫",
+                Self::Delete => return "⌦",
+                Self::ArrowLeft => return "←",
+                Self::ArrowRight => return "→",
+                Self::ArrowUp => return "↑",
+                Self::ArrowDown => return "↓",
+                _ => {}
+            }
+        }
+        match self {
+            Self::Tab => "Tab",
+            Self::Enter => "Enter",
+            Self::Space => "Space",
+            Self::Escape => "Esc",
+            Self::Backspace => "Backspace",
+            Self::Delete => "Delete",
+            Self::ArrowLeft => "Left",
+            Self::ArrowRight => "Right",
+            Self::ArrowUp => "Up",
+            Self::ArrowDown => "Down",
+            Self::Home => "Home",
+            Self::End => "End",
+            Self::PageUp => "PgUp",
+            Self::PageDown => "PgDn",
+            Self::Minus => "-",
+            Self::Equals => "=",
+            Self::A => "A",
+            Self::B => "B",
+            Self::C => "C",
+            Self::D => "D",
+            Self::E => "E",
+            Self::F => "F",
+            Self::G => "G",
+            Self::H => "H",
+            Self::I => "I",
+            Self::J => "J",
+            Self::K => "K",
+            Self::L => "L",
+            Self::M => "M",
+            Self::N => "N",
+            Self::O => "O",
+            Self::P => "P",
+            Self::Q => "Q",
+            Self::R => "R",
+            Self::S => "S",
+            Self::T => "T",
+            Self::U => "U",
+            Self::V => "V",
+            Self::W => "W",
+            Self::X => "X",
+            Self::Y => "Y",
+            Self::Z => "Z",
+            Self::Num0 => "0",
+            Self::Num1 => "1",
+            Self::Num2 => "2",
+            Self::Num3 => "3",
+            Self::Num4 => "4",
+            Self::Num5 => "5",
+            Self::Num6 => "6",
+            Self::Num7 => "7",
+            Self::Num8 => "8",
+            Self::Num9 => "9",
+            Self::F1 => "F1",
+            Self::F2 => "F2",
+            Self::F3 => "F3",
+            Self::F4 => "F4",
+            Self::F5 => "F5",
+            Self::F6 => "F6",
+            Self::F7 => "F7",
+            Self::F8 => "F8",
+            Self::F9 => "F9",
+            Self::F10 => "F10",
+            Self::F11 => "F11",
+            Self::F12 => "F12",
+        }
+    }
 }
 
 /// Modifier keys held during an event.
@@ -105,6 +278,30 @@ impl Modifiers {
         ..Self::NONE
     };
 
+    /// Only the platform's shortcut modifier: Command on macOS, Ctrl
+    /// elsewhere (see [`Modifiers::command`]).
+    pub const COMMAND: Self = if cfg!(target_os = "macos") {
+        Self {
+            logo: true,
+            ..Self::NONE
+        }
+    } else {
+        Self {
+            ctrl: true,
+            ..Self::NONE
+        }
+    };
+
+    /// Combines two sets of modifiers (e.g. `Modifiers::COMMAND.plus(Modifiers::SHIFT)`).
+    pub const fn plus(self, other: Self) -> Self {
+        Self {
+            shift: self.shift || other.shift,
+            ctrl: self.ctrl || other.ctrl,
+            alt: self.alt || other.alt,
+            logo: self.logo || other.logo,
+        }
+    }
+
     /// The platform's shortcut modifier: Command on macOS, Ctrl elsewhere.
     pub fn command(&self) -> bool {
         if cfg!(target_os = "macos") {
@@ -127,6 +324,52 @@ impl Modifiers {
     /// True if no modifier is held.
     pub fn is_none(&self) -> bool {
         *self == Self::NONE
+    }
+}
+
+/// A key combination such as Cmd/Ctrl+Z, to handle with
+/// [`InputState::consume_shortcut`] and show next to menu items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct KeyboardShortcut {
+    /// Modifiers that must be held (exactly these).
+    pub modifiers: Modifiers,
+    /// The key.
+    pub key: Key,
+}
+
+impl KeyboardShortcut {
+    /// A shortcut of `key` with exactly `modifiers`.
+    pub const fn new(modifiers: Modifiers, key: Key) -> Self {
+        Self { modifiers, key }
+    }
+
+    /// The shortcut as shown to users: "⇧⌘Z" on macOS, "Ctrl+Shift+Z"
+    /// elsewhere.
+    pub fn format(&self) -> String {
+        let m = self.modifiers;
+        if cfg!(target_os = "macos") {
+            let mut s = String::new();
+            for (on, sym) in [(m.ctrl, "⌃"), (m.alt, "⌥"), (m.shift, "⇧"), (m.logo, "⌘")] {
+                if on {
+                    s.push_str(sym);
+                }
+            }
+            s + self.key.symbol()
+        } else {
+            let mut parts: Vec<&str> = Vec::new();
+            for (on, name) in [
+                (m.ctrl, "Ctrl"),
+                (m.logo, "Super"),
+                (m.alt, "Alt"),
+                (m.shift, "Shift"),
+            ] {
+                if on {
+                    parts.push(name);
+                }
+            }
+            parts.push(self.key.symbol());
+            parts.join("+")
+        }
     }
 }
 
@@ -424,6 +667,13 @@ impl InputState {
         }
     }
 
+    /// True (once) if `shortcut` was pressed this frame; the key press is
+    /// removed so nothing else reacts to it. The modifiers must match
+    /// exactly: Cmd+Z doesn't trigger Cmd+Shift+Z.
+    pub fn consume_shortcut(&mut self, shortcut: &KeyboardShortcut) -> bool {
+        self.consume_key(shortcut.key, shortcut.modifiers)
+    }
+
     /// Number of presses of `key` this frame (auto-repeat counts).
     pub fn key_presses(&self, key: Key) -> usize {
         self.keys_pressed.iter().filter(|(k, _)| *k == key).count()
@@ -450,6 +700,37 @@ mod tests {
             events,
             ..Default::default()
         });
+    }
+
+    #[test]
+    fn shortcuts_match_exact_modifiers_and_format_per_platform() {
+        let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
+        let redo = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z);
+        let key = |modifiers| Event::Key {
+            key: Key::Z,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let mut input = InputState::default();
+        frame(&mut input, 0.0, vec![key(redo.modifiers)]);
+        assert!(!input.consume_shortcut(&undo), "Shift must match too");
+        assert!(input.consume_shortcut(&redo));
+        assert!(!input.consume_shortcut(&redo), "consumed once");
+
+        if cfg!(target_os = "macos") {
+            assert_eq!(redo.format(), "⇧⌘Z");
+            assert_eq!(
+                KeyboardShortcut::new(Modifiers::NONE, Key::Backspace).format(),
+                "⌫"
+            );
+        } else {
+            assert_eq!(redo.format(), "Ctrl+Shift+Z");
+            assert_eq!(
+                KeyboardShortcut::new(Modifiers::NONE, Key::F5).format(),
+                "F5"
+            );
+        }
     }
 
     #[test]

@@ -6,6 +6,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-08
+
+### Added
+
+- **New widgets**: `ComboBox` (drop-down list), `DragValue` (a number
+  changed by dragging, arrow keys or typing, with range, speed, prefix and
+  suffix), `SelectableLabel` with `Ui::selectable_label` /
+  `Ui::selectable_value`, `ProgressBar` (text, percentage, animated) and
+  `Spinner`.
+- **Collapsible sections and trees**: `CollapsingHeader` (default open,
+  forced open/closed, keyboard arrows, animated), tree-node style with
+  `.selected(..)` (the label selects, the triangle toggles),
+  `Ui::collapsing` and `Ui::indent`; `Spacing::indent`.
+- **Context menus**: `Response::context_menu(ui, ..)` opens a menu at the
+  pointer on right-click.
+- **All mouse buttons**: `Response::secondary_clicked`, `middle_clicked`,
+  `clicked_by` and `dragged_by(button)` (e.g. middle-drag to pan a view).
+- **Keyboard shortcuts**: `KeyboardShortcut` with `format()` ("⇧⌘S" on
+  macOS, "Ctrl+Shift+S" elsewhere), `InputState::consume_shortcut`,
+  `Modifiers::COMMAND`, `Button::shortcut_text` for menu items; keys A–Z,
+  0–9, F1–F12, `-` and `=`.
+- **Text fields**: Escape restores the text the field had when it got
+  focus; `Response::lost_focus_reason()` returns `FocusLost::Submit`
+  (Enter), `Cancel` (Escape) or `Other` (Tab, click elsewhere), and
+  `Response::submitted()`. `TextEdit::select_all_on_focus(true)` and
+  `TextEdit::id(..)`.
+- `Context::request_focus(id)`, `Context::wants_keyboard_input()` and
+  `Context::remove_data(id)`.
+- More mouse cursors: `ResizeVertical`, `Crosshair`, `Move`, `NotAllowed`.
+- Accessibility roles for the new widgets (combo box, spin button,
+  progress indicator, list item) with expanded and selected states.
+- `testing::Harness::right_click` and `click_with(button)`.
+- New example: `cargo run -p rustroke --example properties`.
+
+### Changed
+
+- Radio buttons inside a menu or combo box close it when clicked.
+- `Response::lost_focus()` is also true when a text field loses focus by
+  Tab or a click elsewhere, not only by Enter.
+- `Spacing` has a new field (`indent`).
+
 ## [0.2.0] — 2026-10-08
 
 ### Added
@@ -89,7 +130,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AndreCusimano/rustroke/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AndreCusimano/rustroke/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/AndreCusimano/rustroke/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/AndreCusimano/rustroke/releases/tag/v0.1.0

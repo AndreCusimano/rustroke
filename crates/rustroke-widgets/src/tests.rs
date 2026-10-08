@@ -1500,3 +1500,448 @@ fn semantic_colors_exist_in_both_themes() {
         assert_ne!(d, l);
     }
 }
+
+// ---- v0.3: more buttons, menus and widgets ----
+
+fn button_by(pos: Point, which: PointerButton, pressed: bool) -> Event {
+    Event::PointerButton {
+        pos,
+        button: which,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+fn click_at(pos: Point) -> Vec<Event> {
+    vec![move_to(pos), button(pos, true), button(pos, false)]
+}
+
+/// INP-01: secondary and middle clicks and drags are reported separately.
+#[test]
+fn other_buttons_click_and_drag() {
+    let mut h = Harness::new();
+    let rect = button_frame(&mut h, vec![]).rect;
+    let p = rect.center();
+    let r = button_frame(
+        &mut h,
+        vec![
+            move_to(p),
+            button_by(p, PointerButton::Secondary, true),
+            button_by(p, PointerButton::Secondary, false),
+        ],
+    );
+    assert!(r.secondary_clicked() && !r.clicked() && !r.middle_clicked());
+    assert_eq!(r.clicked_by(), Some(PointerButton::Secondary));
+
+    let drag_frame = |h: &mut Harness, events| {
+        let mut response = None;
+        h.frame(events, |ui| {
+            response = Some(ui.allocate_response(vec2(100.0, 100.0), crate::Sense::DRAG));
+        });
+        response.unwrap()
+    };
+    let area = drag_frame(&mut h, vec![]).rect;
+    let start = area.center();
+    drag_frame(
+        &mut h,
+        vec![
+            move_to(start),
+            button_by(start, PointerButton::Middle, true),
+        ],
+    );
+    let r = drag_frame(&mut h, vec![move_to(start + vec2(7.0, 3.0))]);
+    assert!(r.dragged_by(PointerButton::Middle));
+    assert!(!r.dragged(), "dragged() is for the primary button");
+    assert_eq!(r.drag_delta(), vec2(7.0, 3.0));
+    let r = drag_frame(
+        &mut h,
+        vec![button_by(
+            start + vec2(7.0, 3.0),
+            PointerButton::Middle,
+            false,
+        )],
+    );
+    assert!(!r.dragged_by(PointerButton::Middle));
+}
+
+/// WID-01: right-click opens a context menu, choosing an item closes it.
+#[test]
+fn context_menu_opens_on_right_click() {
+    let mut h = Harness::new();
+    let mut chosen = 0;
+    let run = |h: &mut Harness, events, chosen: &mut i32| {
+        let mut open = false;
+        let mut target = None;
+        let mut item_rect = None;
+        h.frame(events, |ui| {
+            let r = ui.button("Target");
+            target = Some(r.rect);
+            open = r
+                .context_menu(ui, |ui| {
+                    let item = ui.button("Delete");
+                    item_rect = Some(item.rect);
+                    if item.clicked() {
+                        *chosen += 1;
+                    }
+                })
+                .is_some();
+        });
+        (open, target.unwrap(), item_rect)
+    };
+    let (open, target, _) = run(&mut h, vec![], &mut chosen);
+    assert!(!open);
+    let p = target.center();
+    let (open, ..) = run(
+        &mut h,
+        vec![
+            move_to(p),
+            button_by(p, PointerButton::Secondary, true),
+            button_by(p, PointerButton::Secondary, false),
+        ],
+        &mut chosen,
+    );
+    assert!(open, "opened by the right click");
+    // Measure the menu, then click its item.
+    let (.., item_rect) = run(&mut h, vec![], &mut chosen);
+    let item = item_rect.unwrap().center();
+    assert!(item.y > p.y, "the menu is placed at the pointer");
+    run(&mut h, click_at(item), &mut chosen);
+    assert_eq!(chosen, 1);
+    let (open, ..) = run(&mut h, vec![], &mut chosen);
+    assert!(!open, "choosing an item closes the menu");
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+/// WID-04 and WID-02: a combo box with selectable values.
+#[test]
+fn combo_box_selects_a_value_and_closes() {
+    let mut h = Harness::new();
+    let mut axis = Axis::X;
+    let run = |h: &mut Harness, events, axis: &mut Axis| {
+        let mut item_rects = Vec::new();
+        let mut out = None;
+        h.frame(events, |ui| {
+            let r = crate::ComboBox::from_label("Axis")
+                .selected_text(format!("{axis:?}"))
+                .show_ui(ui, |ui| {
+                    for (v, t) in [(Axis::X, "X"), (Axis::Y, "Y"), (Axis::Z, "Z")] {
+                        item_rects.push(ui.selectable_value(axis, v, t).rect);
+                    }
+                });
+            out = Some((r.inner.is_some(), r.response.rect));
+        });
+        let (open, rect) = out.unwrap();
+        (open, rect, item_rects)
+    };
+    let (open, rect, _) = run(&mut h, vec![], &mut axis);
+    assert!(!open);
+    let (open, ..) = run(&mut h, click_at(rect.min + vec2(10.0, 10.0)), &mut axis);
+    assert!(open);
+    let (.., item_rects) = run(&mut h, vec![], &mut axis);
+    assert!(
+        item_rects[0].width() >= 175.0,
+        "the list is as wide as the box"
+    );
+    let z = item_rects[2].center();
+    run(&mut h, click_at(z), &mut axis);
+    assert_eq!(axis, Axis::Z);
+    let (open, ..) = run(&mut h, vec![], &mut axis);
+    assert!(!open, "choosing closes the list");
+    let widgets = h.ctx.widgets();
+    let combo = widgets.iter().find(|w| w.info.label == "Axis").unwrap();
+    assert_eq!(combo.info.value.as_deref(), Some("Z"));
+    assert_eq!(combo.info.expanded, Some(false));
+}
+
+#[test]
+fn selectable_value_changes_once() {
+    let mut h = Harness::new();
+    let mut v = 1;
+    let run = |h: &mut Harness, events, v: &mut i32| {
+        let mut rects = Vec::new();
+        let mut changed = Vec::new();
+        h.frame(events, |ui| {
+            for i in 1..=3 {
+                let r = ui.selectable_value(v, i, format!("Item {i}"));
+                rects.push(r.rect);
+                changed.push(r.changed());
+            }
+        });
+        (rects, changed)
+    };
+    let (rects, _) = run(&mut h, vec![], &mut v);
+    let target = rects[1].center();
+    let (_, changed) = run(&mut h, click_at(target), &mut v);
+    assert_eq!(v, 2);
+    assert_eq!(changed, [false, true, false]);
+    let (_, changed) = run(&mut h, click_at(target), &mut v);
+    assert_eq!(changed, [false, false, false], "already selected");
+    let item = h.ctx.find_widget("Item 2").unwrap();
+    assert_eq!(item.info.selected, Some(true));
+}
+
+fn drag_value_frame(h: &mut Harness, v: &mut f64, events: Vec<Event>) -> Response {
+    let mut response = None;
+    h.frame(events, |ui| {
+        response = Some(ui.add(crate::DragValue::new(v).speed(0.5).suffix(" mm")));
+    });
+    response.unwrap()
+}
+
+/// WID-05: drag, arrows, click to type, Escape cancels.
+#[test]
+fn drag_value_drags_types_and_cancels() {
+    let mut h = Harness::new();
+    let mut v = 10.0;
+    let rect = drag_value_frame(&mut h, &mut v, vec![]).rect;
+    let p = rect.center();
+    drag_value_frame(&mut h, &mut v, vec![move_to(p), button(p, true)]);
+    let r = drag_value_frame(&mut h, &mut v, vec![move_to(p + vec2(20.0, 0.0))]);
+    assert!(r.changed());
+    assert_eq!(v, 20.0, "0.5 per point");
+    drag_value_frame(&mut h, &mut v, vec![button(p + vec2(20.0, 0.0), false)]);
+    assert_eq!(v, 20.0, "a drag is not a click: no typing");
+    assert!(
+        h.ctx
+            .find_widget("mm")
+            .is_some_and(|w| w.info.role == crate::WidgetRole::DragValue)
+    );
+
+    // Arrow keys while focused (the drag gave it focus).
+    drag_value_frame(&mut h, &mut v, vec![press_key(Key::ArrowUp)]);
+    assert_eq!(v, 20.5);
+
+    // Click: type a value and press Enter.
+    let rect = drag_value_frame(&mut h, &mut v, vec![]).rect;
+    drag_value_frame(&mut h, &mut v, click_at(rect.center()));
+    let r = drag_value_frame(&mut h, &mut v, vec![text("42,5 mm")]);
+    assert!(
+        r.has_focus() && !r.changed(),
+        "typing applies only at the end"
+    );
+    let r = drag_value_frame(&mut h, &mut v, vec![press_key(Key::Enter)]);
+    assert!(r.changed());
+    assert_eq!(v, 42.5);
+    drag_value_frame(&mut h, &mut v, vec![]);
+
+    // Escape discards what was typed.
+    let rect = drag_value_frame(&mut h, &mut v, vec![]).rect;
+    drag_value_frame(&mut h, &mut v, click_at(rect.center()));
+    drag_value_frame(&mut h, &mut v, vec![text("7")]);
+    let r = drag_value_frame(&mut h, &mut v, vec![press_key(Key::Escape)]);
+    assert!(!r.changed());
+    assert_eq!(v, 42.5);
+    let r = drag_value_frame(&mut h, &mut v, vec![]);
+    assert!(!r.has_focus(), "back to the number");
+}
+
+#[test]
+fn drag_value_respects_range_and_integers() {
+    let mut h = Harness::new();
+    let mut n = 5_i32;
+    let run = |h: &mut Harness, n: &mut i32, events| {
+        let mut response = None;
+        h.frame(events, |ui| {
+            response = Some(ui.add(crate::DragValue::new(n).range(0..=8).speed(0.25)));
+        });
+        response.unwrap()
+    };
+    let p = run(&mut h, &mut n, vec![]).rect.center();
+    run(&mut h, &mut n, vec![move_to(p), button(p, true)]);
+    run(&mut h, &mut n, vec![move_to(p + vec2(6.0, 0.0))]);
+    assert_eq!(n, 7, "5 + 6 × 0.25 = 6.5, rounded");
+    run(&mut h, &mut n, vec![move_to(p + vec2(100.0, 0.0))]);
+    assert_eq!(n, 8, "clamped");
+}
+
+/// WID-06
+#[test]
+fn progress_bar_and_spinner() {
+    let mut h = Harness::new();
+    let out = h.frame(vec![], |ui| {
+        ui.add(
+            crate::ProgressBar::new(0.5)
+                .text("3/7")
+                .desired_width(100.0),
+        );
+        ui.spinner();
+    });
+    assert!(out.repaint, "the spinner animates");
+    let bar = h.ctx.find_widget("3/7").unwrap();
+    assert_eq!(bar.rect.width(), 100.0);
+    assert_eq!(bar.info.numeric.map(|n| n.value), Some(0.5));
+    let out = h.frame(vec![], |ui| {
+        ui.add(crate::ProgressBar::new(2.0).show_percentage());
+    });
+    assert!(!out.repaint, "a still bar needs no frames");
+    assert!(h.ctx.find_widget("100%").is_some(), "clamped to 1");
+}
+
+fn collapsing_frame(
+    h: &mut Harness,
+    events: Vec<Event>,
+    header: crate::CollapsingHeader,
+) -> (crate::CollapsingResponse<()>, bool, Rect) {
+    let mut out = None;
+    let mut body_shown = false;
+    h.frame(events, |ui| {
+        let r = header.show(ui, |ui| {
+            body_shown = true;
+            ui.label("body");
+        });
+        let after = ui.button("After").rect;
+        out = Some((r, after));
+    });
+    let (r, after) = out.unwrap();
+    (r, body_shown, after)
+}
+
+/// LAY-04
+#[test]
+fn collapsing_header_opens_and_closes() {
+    let mut h = Harness::new();
+    let header = || crate::CollapsingHeader::new("Parameters");
+    let (r, shown, closed_after) = collapsing_frame(&mut h, vec![], header());
+    assert!(!r.open && !shown && r.body_returned.is_none());
+    let p = r.header_response.rect.center();
+    let (r, ..) = collapsing_frame(&mut h, click_at(p), header());
+    assert!(r.open && r.header_response.changed());
+    // Let the animation finish.
+    for _ in 0..30 {
+        collapsing_frame(&mut h, vec![], header());
+    }
+    let (r, shown, open_after) = collapsing_frame(&mut h, vec![], header());
+    assert!(shown && r.body_returned.is_some());
+    assert!(
+        open_after.min.y > closed_after.min.y + 15.0,
+        "the body takes space"
+    );
+    let body = h.ctx.find_widget("body").unwrap();
+    assert!(
+        body.rect.min.x >= r.header_response.rect.min.x + 18.0,
+        "indented"
+    );
+    let info = &h.ctx.find_widget("Parameters").unwrap().info;
+    assert_eq!(info.expanded, Some(true));
+
+    // Keyboard: Left closes the focused header (focused by the click).
+    let (r, ..) = collapsing_frame(&mut h, vec![press_key(Key::ArrowLeft)], header());
+    assert!(!r.open);
+
+    let mut h = Harness::new();
+    let (r, shown, _) = collapsing_frame(
+        &mut h,
+        vec![],
+        crate::CollapsingHeader::new("Open").default_open(true),
+    );
+    assert!(r.open && shown);
+}
+
+#[test]
+fn tree_nodes_select_with_the_label_and_toggle_with_the_triangle() {
+    let mut h = Harness::new();
+    let node = || crate::CollapsingHeader::new("Part").selected(false);
+    let (r, ..) = collapsing_frame(&mut h, vec![], node());
+    let rect = r.header_response.rect;
+    let (r, ..) = collapsing_frame(&mut h, click_at(rect.center()), node());
+    assert!(
+        r.header_response.clicked() && !r.open,
+        "label click selects"
+    );
+    let triangle = point(rect.min.x - 10.0, rect.center().y);
+    let (r, ..) = collapsing_frame(&mut h, click_at(triangle), node());
+    assert!(r.open && !r.header_response.clicked(), "triangle toggles");
+}
+
+/// TXT-01: Escape restores the text; the lost-focus reason tells why.
+#[test]
+fn text_edit_escape_restores_and_reports_reasons() {
+    use crate::FocusLost;
+    let mut h = Harness::new();
+    let mut s = String::from("10");
+    focused_field(&mut h, &mut s, false);
+    assert!(h.ctx.wants_keyboard_input());
+    edit_frame(&mut h, &mut s, false, vec![text("0")]);
+    assert_eq!(s, "100");
+    let (r, _) = edit_frame(&mut h, &mut s, false, vec![press_key(Key::Escape)]);
+    assert_eq!(r.lost_focus_reason(), Some(FocusLost::Cancel));
+    assert!(r.changed());
+    assert_eq!(s, "10");
+    let (r, _) = edit_frame(&mut h, &mut s, false, vec![]);
+    assert!(!r.has_focus() && !r.lost_focus());
+    assert!(!h.ctx.wants_keyboard_input());
+
+    focused_field(&mut h, &mut s, false);
+    let (r, _) = edit_frame(&mut h, &mut s, false, vec![press_key(Key::Enter)]);
+    assert_eq!(r.lost_focus_reason(), Some(FocusLost::Submit));
+    assert!(r.submitted());
+
+    focused_field(&mut h, &mut s, false);
+    let (r, _) = edit_frame(&mut h, &mut s, false, click_at(point(390.0, 290.0)));
+    assert_eq!(r.lost_focus_reason(), Some(FocusLost::Other));
+}
+
+/// TXT-02: typing replaces the whole value after focusing.
+#[test]
+fn text_edit_select_all_on_focus() {
+    let mut h = Harness::new();
+    let mut s = String::from("12.5");
+    let run = |h: &mut Harness, s: &mut String, events| {
+        let mut response = None;
+        h.frame(events, |ui| {
+            response = Some(ui.add(crate::TextEdit::singleline(s).select_all_on_focus(true)));
+        });
+        response.unwrap()
+    };
+    let rect = run(&mut h, &mut s, vec![]).rect;
+    run(&mut h, &mut s, click_at(rect.center()));
+    run(&mut h, &mut s, vec![text("7")]);
+    assert_eq!(s, "7");
+}
+
+#[test]
+fn request_focus_gives_a_text_field_focus() {
+    let mut h = Harness::new();
+    let mut s = String::from("abc");
+    let id = crate::Id::new("name field");
+    h.ctx.request_focus(id);
+    h.frame(vec![], |ui| {
+        ui.add(
+            crate::TextEdit::singleline(&mut s)
+                .id(id)
+                .select_all_on_focus(true),
+        );
+    });
+    h.frame(vec![text("x")], |ui| {
+        ui.add(
+            crate::TextEdit::singleline(&mut s)
+                .id(id)
+                .select_all_on_focus(true),
+        );
+    });
+    assert_eq!(s, "x");
+}
+
+/// INP-04: menu items show their shortcut; the app handles the keys.
+#[test]
+fn menu_items_show_shortcut_text() {
+    let shortcut = rustroke_core::KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
+    let mut h = Harness::new();
+    let out = h.frame(vec![command(Key::S)], |ui| {
+        assert!(ui.input_mut().consume_shortcut(&shortcut));
+        ui.add(crate::Button::new("Save").shortcut_text(shortcut.format()));
+    });
+    let _ = out;
+    let with = h.ctx.find_widget("Save").unwrap().rect.width();
+    h.frame(vec![], |ui| {
+        ui.add(crate::Button::new("Save"));
+    });
+    let without = h.ctx.find_widget("Save").unwrap().rect.width();
+    assert!(with > without + 20.0, "room for the shortcut");
+}

@@ -15,8 +15,11 @@
 //! tested by feeding [`rustroke_core::RawInput`] to a [`Context`].
 
 mod accessibility;
+mod collapsing;
+mod combo_box;
 mod containers;
 mod context;
+mod drag_value;
 mod grid;
 mod id;
 mod layout;
@@ -28,19 +31,23 @@ mod ui;
 pub mod widgets;
 
 pub use accessibility::{NumericInfo, WidgetDescription, WidgetInfo, WidgetRole};
+pub use collapsing::{CollapsingHeader, CollapsingResponse};
+pub use combo_box::ComboBox;
 pub use containers::{CentralPanel, Panel, PanelSide, ScrollArea, UiRoot, Window};
 pub use context::{
     Context, CursorIcon, FrameOutput, LayerId, Order, RepaintHandle, Sense, TextureHandle,
 };
+pub use drag_value::DragValue;
 pub use grid::Grid;
 pub use id::Id;
 pub use layout::{Align, Direction, Layout};
-pub use response::Response;
+pub use response::{FocusLost, Response};
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
 pub use text_edit::TextEdit;
 pub use ui::{InnerResponse, Ui};
 pub use widgets::{
-    Button, Checkbox, Image, Label, Numeric, RadioButton, Separator, Slider, Widget,
+    Button, Checkbox, Image, Label, Numeric, ProgressBar, RadioButton, SelectableLabel, Separator,
+    Slider, Spinner, Widget,
 };
 
 #[cfg(test)]

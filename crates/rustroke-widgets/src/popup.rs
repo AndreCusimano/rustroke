@@ -18,23 +18,45 @@ fn keep_on_screen(rect: Rect, screen: Rect) -> Rect {
     Rect::from_min_size(min, rect.size())
 }
 
-/// Draws floating content in `layer` at `pos`, sized like it was last
-/// frame (measured, then remembered under `id`).
+/// Where and how [`show_floating`] draws.
+struct Floating {
+    layer: LayerId,
+    /// Remembers the content size between frames.
+    id: Id,
+    /// Top-left corner (moved to stay on screen).
+    pos: Point,
+    /// Content wraps at this width.
+    max_width: f32,
+    /// The popup is at least this wide (e.g. as wide as a combo box).
+    min_width: f32,
+    /// Popup menus block clicks to what is below; tooltips don't.
+    interactive: bool,
+}
+
+/// Draws floating content in `f.layer` at `f.pos`, sized like it was last
+/// frame (measured, then remembered under `f.id`).
 fn show_floating<R>(
     ui: &mut Ui<'_>,
-    layer: LayerId,
-    id: Id,
-    pos: Point,
-    max_width: f32,
-    interactive: bool,
+    f: Floating,
     add_contents: impl FnOnce(&mut Ui<'_>) -> R,
 ) -> R {
+    let Floating {
+        layer,
+        id,
+        pos,
+        max_width,
+        min_width,
+        interactive,
+    } = f;
     let style = ui.style();
     let pad = style.spacing.window_padding;
     let screen = ui.input().screen_rect;
     let size: Vec2 = ui.ctx().data(id).unwrap_or(Vec2::ZERO);
+    // Content at least `min_width` wide (e.g. a combo box's popup is as
+    // wide as the combo box).
+    let content_width = size.x.max(min_width - 2.0 * pad);
     let rect = keep_on_screen(
-        Rect::from_min_size(pos, size + Vec2::splat(2.0 * pad)),
+        Rect::from_min_size(pos, vec2(content_width, size.y) + Vec2::splat(2.0 * pad)),
         screen,
     );
 
@@ -54,7 +76,7 @@ fn show_floating<R>(
             .scope_with_no_advance(content_rect, Layout::top_down(Align::Min), |content| {
                 // Menu items highlight across the whole menu, which is as
                 // wide as the widest item measured last frame.
-                content.set_in_menu(interactive.then_some(size.x));
+                content.set_in_menu(interactive.then_some(content_width));
                 inner = Some(add_contents(content));
             })
             .response
@@ -75,11 +97,53 @@ pub(crate) fn show_popup<R>(
     ui: &mut Ui<'_>,
     owner: Id,
     anchor: Rect,
+    min_width: f32,
     add_contents: impl FnOnce(&mut Ui<'_>) -> R,
 ) -> R {
     let layer = popup_layer(owner);
     let pos = anchor.left_bottom() + vec2(0.0, 4.0);
-    show_floating(ui, layer, layer.id, pos, 220.0, true, add_contents)
+    let floating = Floating {
+        layer,
+        id: layer.id,
+        pos,
+        max_width: 220.0_f32.max(min_width),
+        min_width,
+        interactive: true,
+    };
+    show_floating(ui, floating, add_contents)
+}
+
+impl Response {
+    /// Opens a popup menu at the pointer when the widget is clicked with
+    /// the secondary (right) mouse button. Returns what `add_contents`
+    /// returned while the menu is open. It closes like other menus: by
+    /// choosing a button inside it, clicking elsewhere or pressing Escape.
+    ///
+    /// The widget must react to clicks (buttons, selectable labels, images
+    /// with `Sense::CLICK`...).
+    pub fn context_menu<R>(
+        &self,
+        ui: &mut Ui<'_>,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> Option<R> {
+        let popup = self.id.with("context menu");
+        if self.secondary_clicked() {
+            let pos = ui
+                .input()
+                .pointer
+                .pos()
+                .unwrap_or_else(|| self.rect.center());
+            ui.ctx().insert_data(popup, pos);
+            ui.ctx().open_popup(popup);
+        }
+        if !ui.ctx().is_popup_open(popup) {
+            return None;
+        }
+        ui.ctx().keep_alive(popup);
+        let pos: Point = ui.ctx().data(popup).unwrap_or_else(|| self.rect.center());
+        let anchor = Rect::from_min_size(pos - vec2(0.0, 4.0), Vec2::ZERO);
+        Some(show_popup(ui, popup, anchor, 0.0, add_contents))
+    }
 }
 
 impl Response {
@@ -101,7 +165,15 @@ impl Response {
         let id = self.id.with("tooltip");
         let layer = LayerId::new(Order::Tooltip, id);
         let pos = point(pointer.x + 12.0, pointer.y + 18.0);
-        show_floating(ui, layer, id, pos, 280.0, false, |ui| {
+        let floating = Floating {
+            layer,
+            id,
+            pos,
+            max_width: 280.0,
+            min_width: 0.0,
+            interactive: false,
+        };
+        show_floating(ui, floating, |ui| {
             let style = ui.style();
             let galley = ui.layout_text(&text, &style.body, Some(280.0));
             let rect = ui.allocate_rect(galley.size);

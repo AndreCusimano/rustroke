@@ -689,3 +689,103 @@ fn native_textures_are_drawn() {
     assert_eq!(at(16, 16), teal, "image center shows the native texture");
     assert_eq!(at(2, 2), [0, 0, 0, 255], "outside is the clear color");
 }
+
+/// v0.3 widgets: a tree of collapsing headers (one selected), an open
+/// combo box, drag values, a progress bar and a menu with shortcuts.
+fn properties_scene(fonts: &mut Fonts, pixels_per_point: f32) -> DisplayList {
+    use rustroke_core::{Event, Key, KeyboardShortcut, Modifiers, Point, PointerButton, RawInput};
+    use rustroke_widgets::{
+        Button, CentralPanel, CollapsingHeader, ComboBox, Context, DragValue, Grid, Panel,
+        ProgressBar,
+    };
+
+    let screen = Rect::from_min_size(Point::ZERO, vec2(420.0, 300.0));
+    let mut ctx = Context::new();
+    let mut list = DisplayList::new();
+    let mut combo_rect = Rect::NOTHING;
+    let mut time = 0.0;
+    let mut axis = 2;
+    let mut length = 42.5_f64;
+    let mut count = 3_u32;
+    let mut frame = |events: Vec<Event>, combo_rect: &mut Rect| {
+        time += 0.5;
+        ctx.begin_frame(RawInput {
+            time,
+            screen_rect: screen,
+            pixels_per_point,
+            events,
+        });
+        let mut root = (&mut ctx, &mut *fonts);
+        Panel::left("tree")
+            .default_size(130.0)
+            .show(&mut root, |ui| {
+                CollapsingHeader::new("Part")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for (i, name) in ["Plate", "Shaft"].into_iter().enumerate() {
+                            CollapsingHeader::new(name)
+                                .selected(i == 0)
+                                .default_open(i == 1)
+                                .show(ui, |ui| {
+                                    ui.label("Revolve");
+                                });
+                        }
+                    });
+                ui.add(ProgressBar::new(3.0 / 7.0).text("3/7"));
+            });
+        CentralPanel.show(&mut root, |ui| {
+            Grid::new("props").show(ui, |ui| {
+                ui.label("Length");
+                ui.add(DragValue::new(&mut length).speed(0.5).suffix(" mm"));
+                ui.end_row();
+                ui.label("Count");
+                ui.add(DragValue::new(&mut count));
+                ui.end_row();
+                ui.label("Axis");
+                *combo_rect = ComboBox::from_id_salt("axis")
+                    .selected_text(["X", "Y", "Z"][axis])
+                    .width(120.0)
+                    .show_ui(ui, |ui| {
+                        for (i, name) in ["X", "Y", "Z"].into_iter().enumerate() {
+                            ui.selectable_value(&mut axis, i, name);
+                        }
+                    })
+                    .response
+                    .rect;
+                ui.end_row();
+            });
+            let save = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::S);
+            ui.add(Button::new("Save as").shortcut_text(save.format()));
+        });
+        let mut output = ctx.end_frame();
+        list = std::mem::take(&mut output.shapes);
+    };
+    frame(vec![], &mut combo_rect);
+    frame(vec![], &mut combo_rect);
+    let pos = combo_rect.center();
+    let b = |pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    frame(
+        vec![Event::PointerMoved(pos), b(true), b(false)],
+        &mut combo_rect,
+    );
+    for _ in 0..3 {
+        frame(vec![], &mut combo_rect);
+    }
+    list
+}
+
+#[test]
+fn properties_2x() {
+    let mut fonts = Fonts::bundled_only();
+    let list = properties_scene(&mut fonts, 2.0);
+    let size = PhysicalSize::new(840, 600);
+    let clear = rustroke_widgets::Style::dark().visuals.background;
+    if let Some(pixels) = render_with_clear(&list, size, 2.0, fonts.atlas_mut(), clear) {
+        check_snapshot("properties_2x", size, &pixels);
+    }
+}

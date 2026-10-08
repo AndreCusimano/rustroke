@@ -27,6 +27,9 @@ fn paint_focus_ring(ui: &mut Ui<'_>, response: &Response, rect: Rect, corner_rad
     }
 }
 
+/// Space between a menu item's text and its shortcut.
+const SHORTCUT_GAP: f32 = 24.0;
+
 /// Top-left position that vertically centers `galley` in `rect`, starting at `x`.
 fn text_pos(rect: Rect, x: f32, galley: &Galley) -> Point {
     point(x, rect.center().y - galley.size.y / 2.0)
@@ -95,6 +98,7 @@ pub struct Button {
     text: String,
     frame: bool,
     accessible_label: Option<String>,
+    shortcut_text: String,
 }
 
 impl Button {
@@ -104,7 +108,16 @@ impl Button {
             text: text.into(),
             frame: true,
             accessible_label: None,
+            shortcut_text: String::new(),
         }
+    }
+
+    /// Text shown after the label in a weak color, typically the keyboard
+    /// shortcut of a menu item (`KeyboardShortcut::format`). The shortcut
+    /// itself must be handled by the app (`InputState::consume_shortcut`).
+    pub fn shortcut_text(mut self, text: impl Into<String>) -> Self {
+        self.shortcut_text = text.into();
+        self
     }
 
     /// The name screen readers announce (and tests find the widget by),
@@ -132,8 +145,11 @@ impl Widget for Button {
         let style = ui.style();
         let padding = style.spacing.button_padding;
         let galley = ui.layout_text(&self.text, &style.body, None);
+        let shortcut = (!self.shortcut_text.is_empty())
+            .then(|| ui.layout_text(&self.shortcut_text, &style.body, None));
+        let shortcut_width = shortcut.as_ref().map_or(0.0, |g| g.size.x + SHORTCUT_GAP);
         let size = vec2(
-            galley.size.x + 2.0 * padding.x,
+            galley.size.x + shortcut_width + 2.0 * padding.x,
             (galley.size.y + 2.0 * padding.y).max(style.spacing.interact_height),
         );
         let id = ui.next_auto_id();
@@ -171,9 +187,16 @@ impl Widget for Button {
                 rect.center().y - galley.size.y / 2.0,
             )
         } else {
-            rect.center() - galley.size / 2.0
+            rect.center() - galley.size / 2.0 - vec2(shortcut_width / 2.0, 0.0)
         };
         ui.painter().galley(pos, galley, visuals.fg);
+        if let Some(shortcut) = shortcut {
+            // Right-aligned, so shortcuts form a column in menus.
+            let x = rect.max.x - padding.x - shortcut.size.x;
+            let color = style.visuals.weak_text.lerp(visuals.fg, 0.25);
+            ui.painter()
+                .galley(text_pos(rect, x, &shortcut), shortcut, color);
+        }
         paint_focus_ring(ui, &response, rect, radius);
         response
     }
@@ -305,6 +328,9 @@ impl Widget for RadioButton {
             galley.size.y.max(style.spacing.interact_height),
         );
         let response = ui.allocate_response(size, Sense::CLICK);
+        if response.clicked() && ui.in_menu().is_some() {
+            ui.close_menu();
+        }
         ui.describe(
             &response,
             WidgetInfo::new(
@@ -343,6 +369,267 @@ impl Widget for RadioButton {
             .galley(text_pos(rect, text_x, &galley), galley, visuals.fg);
         let indicator = Rect::from_center_size(center, Vec2::splat(icon));
         paint_focus_ring(ui, &response, indicator, icon / 2.0);
+        response
+    }
+}
+
+/// Text that is highlighted when selected, for choosing one of several
+/// options (lists, tabs, combo box items). Usually created with
+/// [`Ui::selectable_value`]. In a menu or combo box, clicking it closes the
+/// popup.
+#[derive(Clone, Debug)]
+pub struct SelectableLabel {
+    selected: bool,
+    text: String,
+    accessible_label: Option<String>,
+}
+
+impl SelectableLabel {
+    /// A label, highlighted if `selected`.
+    pub fn new(selected: bool, text: impl Into<String>) -> Self {
+        Self {
+            selected,
+            text: text.into(),
+            accessible_label: None,
+        }
+    }
+
+    /// The name screen readers announce (and tests find the widget by),
+    /// instead of the visible text.
+    pub fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
+    }
+}
+
+impl Widget for SelectableLabel {
+    fn ui(self, ui: &mut Ui<'_>) -> Response {
+        let style = ui.style();
+        let padding = vec2(style.spacing.button_padding.x / 2.0, 2.0);
+        let galley = ui.layout_text(&self.text, &style.body, None);
+        let mut size = galley.size + padding * 2.0;
+        let menu_width = ui.in_menu();
+        if let Some(width) = menu_width {
+            size.x = size.x.max(width);
+            size.y = size.y.max(style.spacing.interact_height);
+        }
+        let response = ui.allocate_response(size, Sense::CLICK);
+        if response.clicked() && menu_width.is_some() {
+            ui.close_menu();
+        }
+        ui.describe(
+            &response,
+            WidgetInfo::new(
+                WidgetRole::SelectableItem,
+                self.accessible_label
+                    .clone()
+                    .unwrap_or_else(|| self.text.clone()),
+            )
+            .selected(self.selected),
+        );
+
+        let rect = response.rect;
+        let visuals = ui.widget_visuals(&response);
+        let radius = style.visuals.small_corner_radius;
+        if self.selected {
+            ui.painter()
+                .rect_filled(rect, radius, style.visuals.selection);
+        } else if response.hovered() || response.is_pressed() {
+            ui.painter().rect_filled(rect, radius, visuals.bg_fill);
+        }
+        let fg = if self.selected {
+            style.visuals.text
+        } else {
+            visuals.fg
+        };
+        ui.painter()
+            .galley(text_pos(rect, rect.min.x + padding.x, &galley), galley, fg);
+        paint_focus_ring(ui, &response, rect, radius);
+        response
+    }
+}
+
+/// A horizontal bar showing how much of a task is done.
+#[derive(Clone, Debug)]
+pub struct ProgressBar {
+    progress: f32,
+    text: Option<String>,
+    show_percentage: bool,
+    desired_width: Option<f32>,
+    animate: bool,
+}
+
+impl ProgressBar {
+    /// A bar `progress` full (0 = empty, 1 = complete).
+    pub fn new(progress: f32) -> Self {
+        Self {
+            progress: progress.clamp(0.0, 1.0),
+            text: None,
+            show_percentage: false,
+            desired_width: None,
+            animate: false,
+        }
+    }
+
+    /// Text drawn on the bar (e.g. "Loading mesh…").
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
+    }
+
+    /// Shows the percentage on the bar (when no text is set).
+    pub fn show_percentage(mut self) -> Self {
+        self.show_percentage = true;
+        self
+    }
+
+    /// Width in points (default: the available width).
+    pub fn desired_width(mut self, width: f32) -> Self {
+        self.desired_width = Some(width);
+        self
+    }
+
+    /// Shows a moving highlight while the task runs, for tasks whose
+    /// progress is unknown (use `ProgressBar::new(0.0).animate(true)`)
+    /// or only updates now and then.
+    pub fn animate(mut self, animate: bool) -> Self {
+        self.animate = animate;
+        self
+    }
+}
+
+impl Widget for ProgressBar {
+    fn ui(self, ui: &mut Ui<'_>) -> Response {
+        let style = ui.style();
+        let text = self.text.clone().or_else(|| {
+            self.show_percentage
+                .then(|| format!("{:.0}%", self.progress * 100.0))
+        });
+        let galley = text.as_ref().map(|t| ui.layout_text(t, &style.body, None));
+        let height = galley.as_ref().map_or(8.0, |g| g.size.y + 4.0).max(8.0);
+        let width = self
+            .desired_width
+            .unwrap_or_else(|| ui.available_width())
+            .max(height);
+        let response = ui.allocate_response(vec2(width, height), Sense::HOVER);
+        let label = text.clone().unwrap_or_else(|| "Progress".to_owned());
+        ui.describe(
+            &response,
+            WidgetInfo::new(WidgetRole::Progress, label).numeric(NumericInfo {
+                value: f64::from(self.progress),
+                min: 0.0,
+                max: 1.0,
+                step: None,
+            }),
+        );
+
+        let rect = response.rect;
+        let radius = height / 2.0;
+        let visuals = &style.visuals;
+        ui.painter()
+            .rect_filled(rect, radius, visuals.inactive.bg_fill);
+        let fill_width = if self.progress > 0.0 {
+            (rect.width() * self.progress).max(height)
+        } else {
+            0.0
+        };
+        if fill_width > 0.0 {
+            let fill = Rect::from_min_size(rect.min, vec2(fill_width, height));
+            ui.painter().rect_filled(fill, radius, visuals.accent);
+        }
+        if self.animate {
+            // A soft highlight sweeping across the bar.
+            let t = (ui.input().time % 1.5 / 1.5) as f32;
+            let w = rect.width() * 0.25;
+            let x = rect.min.x - w + (rect.width() + w) * t;
+            let band = Rect::from_min_max(
+                point(x.max(rect.min.x), rect.min.y),
+                point((x + w).min(rect.max.x), rect.max.y),
+            );
+            if band.width() > 0.0 {
+                let shine = visuals.on_accent.with_alpha(0.25);
+                ui.painter().rect_filled(band, radius, shine);
+            }
+            ui.ctx().request_repaint();
+        }
+        if let Some(galley) = galley {
+            // Readable on both parts: on-accent color over the filled part,
+            // text color over the rest.
+            let pos = rect.center() - galley.size / 2.0;
+            let split = rect.min.x + fill_width;
+            let saved_clip = ui.clip_rect();
+            let parts = [
+                (
+                    point(rect.min.x, rect.min.y),
+                    point(split, rect.max.y),
+                    visuals.on_accent,
+                ),
+                (point(split, rect.min.y), rect.max, visuals.text),
+            ];
+            for (min, max, color) in parts {
+                let part = Rect::from_min_max(min, max);
+                if part.width() > 0.0 {
+                    ui.clip_rect_restore(saved_clip);
+                    ui.set_clip_rect(part);
+                    ui.painter().galley(pos, Arc::clone(&galley), color);
+                }
+            }
+            ui.clip_rect_restore(saved_clip);
+        }
+        response
+    }
+}
+
+/// A rotating arc showing that something is in progress.
+#[derive(Clone, Debug, Default)]
+pub struct Spinner {
+    size: Option<f32>,
+    color: Option<Color>,
+}
+
+impl Spinner {
+    /// A spinner as tall as a line of text.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Diameter in points.
+    pub fn size(mut self, size: f32) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// Color of the arc (default: the text color).
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+impl Widget for Spinner {
+    fn ui(self, ui: &mut Ui<'_>) -> Response {
+        let style = ui.style();
+        let size = self
+            .size
+            .unwrap_or(style.body.size * style.body.line_height);
+        let response = ui.allocate_response(Vec2::splat(size), Sense::HOVER);
+        ui.describe(&response, WidgetInfo::new(WidgetRole::Progress, "Busy"));
+        let color = self.color.unwrap_or(style.visuals.text);
+        let center = response.rect.center();
+        let radius = size / 2.0 - 1.5;
+        let time = ui.input().time;
+        let start = (time * 4.0) as f32;
+        // The arc grows and shrinks while it turns.
+        let sweep = std::f32::consts::PI * (1.0 + 0.5 * (time * 2.0).sin() as f32);
+        let n = 24;
+        let points = (0..=n)
+            .map(|i| {
+                let a = start + sweep * i as f32 / n as f32;
+                center + vec2(a.cos(), a.sin()) * radius
+            })
+            .collect();
+        ui.painter().polyline(points, Stroke::new(2.0, color));
+        ui.ctx().request_repaint();
         response
     }
 }

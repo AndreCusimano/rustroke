@@ -31,6 +31,16 @@ pub enum WidgetRole {
     MultilineTextInput,
     /// An image.
     Image,
+    /// An item that can be selected (e.g. in a list or a combo box).
+    SelectableItem,
+    /// A drop-down list (combo box).
+    ComboBox,
+    /// A number edited by dragging or typing.
+    DragValue,
+    /// A progress bar or activity indicator.
+    Progress,
+    /// The header of a collapsible section.
+    CollapsingHeader,
 }
 
 /// A widget as seen by a screen reader.
@@ -46,6 +56,10 @@ pub struct WidgetInfo {
     pub toggled: Option<bool>,
     /// Value and range of sliders.
     pub numeric: Option<NumericInfo>,
+    /// Expanded state of collapsible sections and open combo boxes.
+    pub expanded: Option<bool>,
+    /// Selected state of selectable items.
+    pub selected: Option<bool>,
 }
 
 /// The value and range of a slider, for screen readers.
@@ -70,7 +84,21 @@ impl WidgetInfo {
             value: None,
             toggled: None,
             numeric: None,
+            expanded: None,
+            selected: None,
         }
+    }
+
+    /// Adds the expanded state.
+    pub fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
+    }
+
+    /// Adds the selected state.
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = Some(selected);
+        self
     }
 
     /// Adds the checked state.
@@ -157,6 +185,11 @@ fn widget_node(w: &WidgetDescription) -> Node {
         WidgetRole::TextInput => Role::TextInput,
         WidgetRole::MultilineTextInput => Role::MultilineTextInput,
         WidgetRole::Image => Role::Image,
+        WidgetRole::SelectableItem => Role::ListBoxOption,
+        WidgetRole::ComboBox => Role::ComboBox,
+        WidgetRole::DragValue => Role::SpinButton,
+        WidgetRole::Progress => Role::ProgressIndicator,
+        WidgetRole::CollapsingHeader => Role::Button,
     };
     let mut node = Node::new(role);
     node.set_bounds(to_ak_rect(w.rect));
@@ -168,6 +201,12 @@ fn widget_node(w: &WidgetDescription) -> Node {
     }
     if let Some(on) = info.toggled {
         node.set_toggled(Toggled::from(on));
+    }
+    if let Some(expanded) = info.expanded {
+        node.set_expanded(expanded);
+    }
+    if let Some(selected) = info.selected {
+        node.set_selected(selected);
     }
     if let Some(n) = info.numeric {
         node.set_numeric_value(n.value);
@@ -185,7 +224,12 @@ fn widget_node(w: &WidgetDescription) -> Node {
         }
         if matches!(
             info.role,
-            WidgetRole::Button | WidgetRole::Checkbox | WidgetRole::RadioButton
+            WidgetRole::Button
+                | WidgetRole::Checkbox
+                | WidgetRole::RadioButton
+                | WidgetRole::SelectableItem
+                | WidgetRole::ComboBox
+                | WidgetRole::CollapsingHeader
         ) {
             node.add_action(Action::Click);
         }

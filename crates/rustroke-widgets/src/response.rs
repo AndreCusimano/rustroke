@@ -1,6 +1,18 @@
-use rustroke_core::{Point, Rect, Vec2};
+use rustroke_core::{Point, PointerButton, Rect, Vec2};
 
 use crate::Id;
+
+/// Why a widget (usually a text field) gave up keyboard focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FocusLost {
+    /// Enter in a single-line field: accept the value.
+    Submit,
+    /// Escape: the edit was cancelled (text fields restore the text they
+    /// had when they got focus).
+    Cancel,
+    /// Anything else: Tab, a click elsewhere, focus moved by the app.
+    Other,
+}
 
 /// The result of adding a widget: where it is and how the user
 /// interacted with it this frame.
@@ -20,8 +32,10 @@ pub struct Response {
     pub(crate) changed: bool,
     pub(crate) has_focus: bool,
     pub(crate) focus_visible: bool,
-    pub(crate) lost_focus: bool,
+    pub(crate) lost_focus: Option<FocusLost>,
     pub(crate) hover_pos: Option<Point>,
+    pub(crate) clicked_by: Option<PointerButton>,
+    pub(crate) drag_button: Option<PointerButton>,
     pub(crate) interact_pos: Option<Point>,
 }
 
@@ -40,8 +54,10 @@ impl Response {
             changed: false,
             has_focus: false,
             focus_visible: false,
-            lost_focus: false,
+            lost_focus: None,
             hover_pos: None,
+            clicked_by: None,
+            drag_button: None,
             interact_pos: None,
         }
     }
@@ -59,6 +75,30 @@ impl Response {
     /// Clicked with the pointer, or activated with Enter/Space while focused.
     pub fn clicked(&self) -> bool {
         self.clicked
+    }
+
+    /// Clicked with the secondary (usually right) mouse button, e.g. to
+    /// open a context menu (see [`Response::context_menu`]).
+    pub fn secondary_clicked(&self) -> bool {
+        self.clicked_by == Some(PointerButton::Secondary)
+    }
+
+    /// Clicked with the middle mouse button.
+    pub fn middle_clicked(&self) -> bool {
+        self.clicked_by == Some(PointerButton::Middle)
+    }
+
+    /// The button that clicked the widget this frame, if any. (Keyboard
+    /// activation reports [`Response::clicked`] without a button.)
+    pub fn clicked_by(&self) -> Option<PointerButton> {
+        self.clicked_by
+    }
+
+    /// Being dragged with `button` this frame (any button, not only the
+    /// primary one: e.g. middle-drag to pan a view). [`Response::dragged`]
+    /// only reports primary-button drags.
+    pub fn dragged_by(&self, button: PointerButton) -> bool {
+        self.drag_button == Some(button)
     }
 
     /// A drag started this frame.
@@ -108,10 +148,23 @@ impl Response {
         self.interact_pos
     }
 
-    /// The widget gave up focus this frame (e.g. Enter in a single-line
-    /// text field: "submit").
+    /// The widget gave up focus this frame: Enter in a single-line text
+    /// field, Escape, Tab or a click elsewhere. See
+    /// [`Response::lost_focus_reason`] to tell them apart.
     pub fn lost_focus(&self) -> bool {
+        self.lost_focus.is_some()
+    }
+
+    /// Why the widget gave up focus this frame, if it did. Text fields
+    /// report [`FocusLost::Submit`] for Enter and [`FocusLost::Cancel`]
+    /// for Escape (after restoring their text).
+    pub fn lost_focus_reason(&self) -> Option<FocusLost> {
         self.lost_focus
+    }
+
+    /// Enter was pressed in a single-line text field ("submit").
+    pub fn submitted(&self) -> bool {
+        self.lost_focus == Some(FocusLost::Submit)
     }
 
     /// Has focus that was reached with the keyboard, so a focus ring should

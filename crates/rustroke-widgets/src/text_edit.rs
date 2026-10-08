@@ -2,7 +2,7 @@
 
 use rustroke_core::{Event, Galley, ImeEvent, Key, Modifiers, Point, Rect, Stroke, point, vec2};
 
-use crate::{CursorIcon, Response, Sense, Ui, Widget, WidgetInfo, WidgetRole};
+use crate::{CursorIcon, FocusLost, Id, Response, Sense, Ui, Widget, WidgetInfo, WidgetRole};
 
 /// Seconds the text cursor stays visible, then hidden, while blinking.
 const BLINK_HALF_PERIOD: f64 = 0.5;
@@ -22,6 +22,9 @@ struct TextEditState {
     preedit: String,
     /// When the cursor last moved (restarts the blink).
     last_change: f64,
+    /// The text when the field got focus, restored by Escape. `None`
+    /// while the field is not focused.
+    original: Option<String>,
 }
 
 impl TextEditState {
@@ -48,7 +51,9 @@ impl TextEditState {
 /// Mouse: click to place the cursor, drag or Shift+click to select.
 /// Keyboard: arrows, Home/End, Alt/Ctrl+arrows by word, Shift to select,
 /// Backspace/Delete, Cmd/Ctrl+A/C/X/V. Enter in a single-line field ends
-/// editing ([`Response::lost_focus`]).
+/// editing ([`FocusLost::Submit`]); Escape restores the text the field had
+/// when it got focus and ends editing ([`FocusLost::Cancel`]). See
+/// [`Response::lost_focus_reason`].
 #[derive(Debug)]
 pub struct TextEdit<'t> {
     text: &'t mut String,
@@ -57,6 +62,8 @@ pub struct TextEdit<'t> {
     desired_width: Option<f32>,
     desired_rows: usize,
     accessible_label: Option<String>,
+    id: Option<Id>,
+    select_all_on_focus: bool,
 }
 
 impl<'t> TextEdit<'t> {
@@ -69,6 +76,8 @@ impl<'t> TextEdit<'t> {
             desired_width: None,
             desired_rows: 1,
             accessible_label: None,
+            id: None,
+            select_all_on_focus: false,
         }
     }
 
@@ -101,6 +110,20 @@ impl<'t> TextEdit<'t> {
         self
     }
 
+    /// A fixed id instead of an automatic one, e.g. to give the field focus
+    /// with `Context::request_focus`.
+    pub fn id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    /// Selects the whole text when the field gets focus (by click, Tab or
+    /// `Context::request_focus`), so typing replaces it.
+    pub fn select_all_on_focus(mut self, select_all: bool) -> Self {
+        self.select_all_on_focus = select_all;
+        self
+    }
+
     /// Minimum height of a multi-line field, in rows of text.
     pub fn desired_rows(mut self, rows: usize) -> Self {
         self.desired_rows = rows.max(1);
@@ -123,7 +146,7 @@ impl Widget for TextEdit<'_> {
         let row_height = style.body.size * style.body.line_height;
         let wrap = self.multiline.then_some(inner_width);
 
-        let id = ui.next_auto_id();
+        let id = self.id.unwrap_or_else(|| ui.next_auto_id());
         let mut state: TextEditState = ui.ctx().data(id).unwrap_or_default();
         state.cursor = clamp_to_boundary(self.text, state.cursor);
         state.anchor = clamp_to_boundary(self.text, state.anchor);
@@ -169,6 +192,15 @@ impl Widget for TextEdit<'_> {
         let mut changed = false;
         let old_cursor = state.cursor;
 
+        let gained_focus = response.has_focus() && state.original.is_none();
+        if !response.has_focus() && state.original.take().is_some() {
+            // Focus moved away (Tab, click elsewhere): keep the edits.
+            response.lost_focus = Some(FocusLost::Other);
+        }
+        if gained_focus {
+            state.original = Some(self.text.clone());
+        }
+
         // Mouse: place the cursor and select by dragging.
         if (response.drag_started() || response.dragged())
             && let Some(pos) = ui.input().pointer.pos()
@@ -180,8 +212,14 @@ impl Widget for TextEdit<'_> {
             state.preferred_x = None;
         }
 
+        if gained_focus && self.select_all_on_focus {
+            state.anchor = 0;
+            state.cursor = self.text.len();
+        }
+
         // Keyboard and text input, in the order they happened.
         if response.has_focus() {
+            ui.ctx().set_keyboard_owner(id);
             let events = ui.input().events.clone();
             let mut galley = std::sync::Arc::clone(&galley);
             for event in events {
@@ -226,8 +264,21 @@ impl Widget for TextEdit<'_> {
                         KeyResult::Moved | KeyResult::Ignored => false,
                         KeyResult::Submit => {
                             ui.ctx().clear_focus();
-                            response.lost_focus = true;
+                            state.original = None;
+                            response.lost_focus = Some(FocusLost::Submit);
                             false
+                        }
+                        KeyResult::Cancel => {
+                            ui.ctx().clear_focus();
+                            response.lost_focus = Some(FocusLost::Cancel);
+                            match state.original.take() {
+                                Some(original) if original != *self.text => {
+                                    *self.text = original;
+                                    state.move_to(self.text.len(), false);
+                                    true
+                                }
+                                _ => false,
+                            }
                         }
                     },
                     _ => false,
@@ -386,6 +437,7 @@ enum KeyResult {
     Edited,
     Moved,
     Submit,
+    Cancel,
     Ignored,
 }
 
@@ -549,6 +601,7 @@ fn on_key(
             KeyResult::Edited
         }
         Key::Enter => KeyResult::Submit,
+        Key::Escape => KeyResult::Cancel,
         _ => KeyResult::Ignored,
     };
     if !vertical {
