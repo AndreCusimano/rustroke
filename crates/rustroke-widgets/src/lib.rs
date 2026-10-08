@@ -19,6 +19,7 @@ mod collapsing;
 mod combo_box;
 mod containers;
 mod context;
+mod dock;
 mod drag_value;
 mod grid;
 mod id;
@@ -27,6 +28,7 @@ mod list;
 mod popup;
 mod response;
 mod style;
+mod tabs;
 mod text_edit;
 mod ui;
 pub mod widgets;
@@ -38,6 +40,7 @@ pub use containers::{CentralPanel, Panel, PanelSide, ScrollArea, UiRoot, Window}
 pub use context::{
     Context, CursorIcon, FrameOutput, LayerId, Order, RepaintHandle, Sense, TextureHandle,
 };
+pub use dock::{DockArea, DockNode, DockState, DockViewer, SplitAxis};
 pub use drag_value::DragValue;
 pub use grid::Grid;
 pub use id::Id;
@@ -45,6 +48,7 @@ pub use layout::{Align, Direction, Layout};
 pub use list::{List, ListResponse};
 pub use response::{FocusLost, Response};
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
+pub use tabs::{TabBar, TabBarResponse, TabLabel};
 pub use text_edit::TextEdit;
 pub use ui::{InnerResponse, Ui};
 pub use widgets::{

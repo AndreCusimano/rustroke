@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-09
+
+### Added
+
+- **Tab bars**: `TabBar::new(id).add_button(..).show(ui, &mut items,
+  &mut active, |item| TabLabel::new(name).icon(..).modified(..))`: click
+  to switch, drag to reorder, × or middle click to close (the app decides,
+  through `TabBarResponse::close_requested`), optional "+", per-tab
+  responses for context menus. Modified tabs show a dot instead of ×.
+- **Docking**: `DockArea::new(id).show(ui, &mut dock_state, &mut viewer)`
+  arranges panels as tab groups in resizable splits. Drag a tab to
+  reorder it, into another group's tab bar, or onto a side of a group to
+  split it (with a preview of where it goes); drag the line between groups
+  to resize them. The layout is a `DockState` owned by the app (built with
+  `DockState::new` and `split`, changed with `push_tab`, `remove_tab`,
+  inspected with `root`, `groups`, `tabs`, `find_group`); the app shows
+  the tabs through the `DockViewer` trait (`label`, `ui`, `closable`,
+  `on_close`, `context_menu`, `add_tab`).
+- `WidgetRole::Tab`, exposed to screen readers as tabs.
+- New example: `docking` (document tabs and dockable panels).
+
 ## [0.5.0] — 2026-10-09
 
 ### Added
@@ -212,7 +233,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/AndreCusimano/rustroke/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AndreCusimano/rustroke/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AndreCusimano/rustroke/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AndreCusimano/rustroke/compare/v0.2.0...v0.3.0

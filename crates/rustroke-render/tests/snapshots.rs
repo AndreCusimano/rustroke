@@ -940,3 +940,75 @@ fn paint_callbacks_draw_in_their_rect() {
         "the UI shape added later is on top"
     );
 }
+
+/// v0.6: a dock area while a tab is dragged onto the lower half of
+/// another group (split preview).
+fn docking_scene(fonts: &mut Fonts, pixels_per_point: f32) -> DisplayList {
+    use rustroke_core::{Event, Modifiers, Point, PointerButton, RawInput};
+    use rustroke_widgets::{
+        Context, DockArea, DockState, DockViewer, SplitAxis, TabLabel, Ui, UiRoot,
+    };
+
+    struct Viewer;
+    impl DockViewer for Viewer {
+        type Tab = &'static str;
+        fn label(&mut self, tab: &Self::Tab) -> TabLabel {
+            TabLabel::new(*tab)
+        }
+        fn ui(&mut self, ui: &mut Ui<'_>, tab: &mut Self::Tab) {
+            ui.label(format!("{tab} content"));
+        }
+    }
+
+    let screen = Rect::from_min_size(Point::ZERO, vec2(420.0, 300.0));
+    let mut ctx = Context::new();
+    let mut state = DockState::new(vec!["Scene", "Log"]);
+    let root = state.groups()[0];
+    state.split(root, SplitAxis::Horizontal, false, 0.5, vec!["Properties"]);
+    let mut list = DisplayList::new();
+    let mut time = 0.0;
+    let mut frame = |events: Vec<Event>| {
+        time += 0.1;
+        ctx.begin_frame(RawInput {
+            time,
+            screen_rect: screen,
+            pixels_per_point,
+            events,
+        });
+        let mut root = (&mut ctx, &mut *fonts);
+        let (ctx, fonts) = root.parts();
+        ctx.ui(screen, fonts, |ui| {
+            DockArea::new("dock").show(ui, &mut state, &mut Viewer);
+        });
+        let mut output = ctx.end_frame();
+        list = std::mem::take(&mut output.shapes);
+        ctx.find_widget("Log").map(|w| w.rect)
+    };
+    frame(vec![]);
+    let log = frame(vec![]).expect("Log tab");
+    let press = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let start = log.center();
+    frame(vec![Event::PointerMoved(start), press(start, true)]);
+    let target = point(330.0, 240.0);
+    for i in 1..=6 {
+        let t = i as f32 / 6.0;
+        frame(vec![Event::PointerMoved(start + (target - start) * t)]);
+    }
+    list
+}
+
+#[test]
+fn docking_drag_2x() {
+    let mut fonts = Fonts::bundled_only();
+    let list = docking_scene(&mut fonts, 2.0);
+    let size = PhysicalSize::new(840, 600);
+    let clear = rustroke_widgets::Style::dark().visuals.background;
+    if let Some(pixels) = render_with_clear(&list, size, 2.0, fonts.atlas_mut(), clear) {
+        check_snapshot("docking_drag_2x", size, &pixels);
+    }
+}

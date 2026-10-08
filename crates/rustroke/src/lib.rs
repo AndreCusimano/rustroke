@@ -72,7 +72,9 @@
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
 //!   [`ScrollArea`] (vertical, horizontal or both), popup menus ([`Ui::menu_button`]), context menus
 //!   ([`Response::context_menu`]), collapsible sections and trees
-//!   ([`CollapsingHeader`]) and tooltips ([`Response::on_hover_text`]).
+//!   ([`CollapsingHeader`]), tab bars ([`TabBar`]), dockable panels
+//!   ([`DockArea`]: tab groups in resizable splits, rearranged by dragging
+//!   tabs) and tooltips ([`Response::on_hover_text`]).
 //!   Show panels before the central area.
 //! - **Mouse and keyboard**: [`Response`] reports clicks and drags per
 //!   button ([`Response::secondary_clicked`], [`Response::dragged_by`]);
@@ -118,7 +120,7 @@
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
-//! `files`, `custom_wgpu`, `integration`, `layout`,
+//! `docking`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
 //!
@@ -141,11 +143,12 @@ pub use rustroke_text::{
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
     Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, ComboBox, Context,
-    CursorIcon, Direction, DragValue, FocusLost, FrameOutput, Grid, Icon, Id, InnerResponse, Label,
-    LayerId, Layout, List, ListResponse, Numeric, Order, Panel, PanelSide, ProgressBar,
-    RadioButton, RepaintHandle, Response, ScrollArea, SelectableLabel, Sense, Separator, Slider,
-    Spinner, Style, TextEdit, TextureHandle, Ui, UiRoot, Visuals, Widget, WidgetDescription,
-    WidgetInfo, WidgetRole, Window,
+    CursorIcon, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
+    FrameOutput, Grid, Icon, Id, InnerResponse, Label, LayerId, Layout, List, ListResponse,
+    Numeric, Order, Panel, PanelSide, ProgressBar, RadioButton, RepaintHandle, Response,
+    ScrollArea, SelectableLabel, Sense, Separator, Slider, Spinner, SplitAxis, Style, TabBar,
+    TabBarResponse, TabLabel, TextEdit, TextureHandle, Ui, UiRoot, Visuals, Widget,
+    WidgetDescription, WidgetInfo, WidgetRole, Window,
 };
 pub use rustroke_winit::{
     App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,

@@ -2495,7 +2495,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "env_logger",
  "image",
@@ -2510,11 +2510,11 @@ dependencies = [
 
 [[package]]
 name = "rustroke-core"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "rustroke-render"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytemuck",
  "log",
@@ -2528,7 +2528,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke-text"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "cosmic-text",
  "log",
@@ -2538,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke-widgets"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "accesskit",
  "rustroke-core",
@@ -2547,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke-winit"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "accesskit",
  "accesskit_winit",

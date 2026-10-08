@@ -92,7 +92,8 @@ fn main() -> Result<(), rustroke::RunError> {
 - **Containers**: top/bottom/side panels (resizable or as wide as their
   content), movable and resizable windows, scroll areas (vertical,
   horizontal, both), popup and context menus, collapsible sections and
-  trees, tooltips.
+  trees, tab bars, dockable panels (drag tabs between groups or to a side to
+  split), tooltips.
 - **Text**: shaping, bidirectional text and wrapping via cosmic-text. The Inter
   font and a symbol font (arrows, math, technical symbols) are bundled; system
   fonts are used for emoji and other scripts.
@@ -134,6 +135,7 @@ Desktop: macOS, Windows, Linux. Minimum Rust version: 1.89.
 cargo run -p rustroke --example widgets     # buttons, checkboxes, radios, sliders, keyboard focus
 cargo run -p rustroke --example properties  # tree, property panel, combo boxes, drag values, shortcuts
 cargo run -p rustroke --example lists       # SVG icons, reorderable list, horizontal scrolling
+cargo run -p rustroke --example docking     # document tabs and dockable panels
 cargo run -p rustroke --example files       # open and save files with native dialogs (rfd)
 cargo run -p rustroke --example custom_wgpu # your own shader inside the UI (paint callback)
 cargo run -p rustroke --example integration # the UI inside your own winit loop and wgpu device
@@ -188,7 +190,7 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.5: the core is complete and tested (interaction tests without a
+Version 0.6: the core is complete and tested (interaction tests without a
 window, GPU snapshot tests, CI on macOS, Windows and Linux). Known limitations
 are listed in the [changelog](CHANGELOG.md). Coming next: extending and
 customizing shapes, and a visual screen designer built with Rustroke itself.

@@ -43,6 +43,8 @@ pub enum WidgetRole {
     CollapsingHeader,
     /// A list of selectable rows.
     List,
+    /// A tab of a tab bar.
+    Tab,
 }
 
 /// A widget as seen by a screen reader.
@@ -193,6 +195,7 @@ fn widget_node(w: &WidgetDescription) -> Node {
         WidgetRole::Progress => Role::ProgressIndicator,
         WidgetRole::CollapsingHeader => Role::Button,
         WidgetRole::List => Role::ListBox,
+        WidgetRole::Tab => Role::Tab,
     };
     let mut node = Node::new(role);
     node.set_bounds(to_ak_rect(w.rect));
@@ -233,6 +236,7 @@ fn widget_node(w: &WidgetDescription) -> Node {
                 | WidgetRole::SelectableItem
                 | WidgetRole::ComboBox
                 | WidgetRole::CollapsingHeader
+                | WidgetRole::Tab
         ) {
             node.add_action(Action::Click);
         }

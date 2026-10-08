@@ -379,7 +379,7 @@ fn range(a: usize, b: usize) -> Vec<usize> {
 }
 
 /// Where the item at `index` ends up after moving `from` to `to`.
-fn moved_index(index: usize, from: usize, to: usize) -> usize {
+pub(crate) fn moved_index(index: usize, from: usize, to: usize) -> usize {
     if index == from {
         to
     } else if from < index && index <= to {

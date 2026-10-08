@@ -2288,3 +2288,197 @@ fn escape_is_left_to_the_app_when_nothing_closes() {
     let (seen, open, _) = menu(&mut h, vec![press_key(Key::Escape)]);
     assert!(!open && !seen, "closing the menu took the key");
 }
+
+// ---- v0.6: tabs and docking ----
+
+fn tab_bar_frame(
+    h: &mut Harness,
+    docs: &mut Vec<&'static str>,
+    active: &mut usize,
+    events: Vec<Event>,
+) -> crate::TabBarResponse {
+    let mut out = None;
+    h.frame(events, |ui| {
+        out = Some(
+            crate::TabBar::new("docs")
+                .add_button(true)
+                .show(ui, docs, active, |d| crate::TabLabel::new(*d)),
+        );
+    });
+    out.unwrap()
+}
+
+/// Drags from `from` to `to` in small steps, over several frames.
+fn drag_events(from: Point, to: Point, steps: usize) -> Vec<Vec<Event>> {
+    let mut frames = vec![vec![move_to(from), button(from, true)]];
+    for s in 1..=steps {
+        let t = s as f32 / steps as f32;
+        frames.push(vec![move_to(from + (to - from) * t)]);
+    }
+    frames.push(vec![button(to, false)]);
+    frames
+}
+
+/// WID-08: switch, close, add and reorder tabs.
+#[test]
+fn tab_bar_switches_closes_and_reorders() {
+    let mut h = Harness::new();
+    let mut docs = vec!["Motor mount", "Base plate", "Assembly"];
+    let mut active = 0;
+    tab_bar_frame(&mut h, &mut docs, &mut active, vec![]);
+    let r = tab_bar_frame(&mut h, &mut docs, &mut active, vec![]);
+    let tabs: Vec<Rect> = r.tabs.iter().map(|t| t.rect).collect();
+    assert!(tabs[1].min.x > tabs[0].max.x);
+
+    let r = tab_bar_frame(&mut h, &mut docs, &mut active, click_at(tabs[1].center()));
+    assert_eq!(r.clicked, Some(1));
+    assert_eq!(active, 1);
+
+    // The × sits at the right end of the tab.
+    let close = point(tabs[2].max.x - 18.0, tabs[2].center().y);
+    let r = tab_bar_frame(&mut h, &mut docs, &mut active, click_at(close));
+    assert_eq!(r.close_requested, Some(2));
+    assert_eq!(active, 1, "closing doesn't switch");
+
+    let add = point(tabs[2].max.x + 14.0, tabs[2].center().y);
+    let r = tab_bar_frame(&mut h, &mut docs, &mut active, click_at(add));
+    assert!(r.add_clicked);
+
+    // Drag the first tab after the second.
+    let mut last = None;
+    for events in drag_events(
+        tabs[0].center(),
+        point(tabs[1].max.x - 5.0, tabs[0].center().y),
+        6,
+    ) {
+        last = Some(tab_bar_frame(&mut h, &mut docs, &mut active, events));
+    }
+    assert_eq!(last.unwrap().moved, Some((0, 1)));
+    assert_eq!(docs, ["Base plate", "Motor mount", "Assembly"]);
+    assert_eq!(active, 0, "the active tab follows its document");
+    assert!(
+        h.ctx
+            .widgets()
+            .iter()
+            .any(|w| w.info.role == crate::WidgetRole::Tab)
+    );
+}
+
+struct Viewer {
+    closed: Vec<&'static str>,
+}
+
+impl crate::DockViewer for Viewer {
+    type Tab = &'static str;
+    fn label(&mut self, tab: &Self::Tab) -> crate::TabLabel {
+        crate::TabLabel::new(*tab)
+    }
+    fn ui(&mut self, ui: &mut Ui<'_>, tab: &mut Self::Tab) {
+        ui.label(format!("Content of {tab}"));
+    }
+    fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
+        self.closed.push(*tab);
+        *tab != "Scene"
+    }
+}
+
+fn dock_frame(
+    h: &mut Harness,
+    state: &mut crate::DockState<&'static str>,
+    viewer: &mut Viewer,
+    events: Vec<Event>,
+) {
+    h.frame(events, |ui| {
+        crate::DockArea::new("dock").show(ui, state, viewer);
+    });
+}
+
+/// LAY-05: drag tabs between groups and onto a side to split.
+#[test]
+fn dock_area_moves_tabs_and_splits() {
+    let mut h = Harness::new();
+    let mut viewer = Viewer { closed: Vec::new() };
+    let mut state = crate::DockState::new(vec!["Scene", "Log"]);
+    let root = state.groups()[0];
+    state.split(
+        root,
+        crate::SplitAxis::Horizontal,
+        false,
+        0.5,
+        vec!["Properties"],
+    );
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    let tab = |h: &Harness, name: &str| h.ctx.find_widget(name).unwrap().rect;
+    assert!(
+        h.ctx.find_widget("Content of Scene").is_some(),
+        "active tab shown"
+    );
+    assert!(
+        h.ctx.find_widget("Content of Log").is_none(),
+        "others hidden"
+    );
+
+    // "Log" into the right group's tab bar.
+    let props = tab(&h, "Properties");
+    for events in drag_events(
+        tab(&h, "Log").center(),
+        point(props.max.x + 10.0, props.center().y),
+        8,
+    ) {
+        dock_frame(&mut h, &mut state, &mut viewer, events);
+    }
+    assert_eq!(state.groups().len(), 2);
+    assert_eq!(state.tabs(), [&"Scene", &"Properties", &"Log"]);
+
+    // "Log" onto the bottom of the left group: a new split.
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    let content = h.ctx.find_widget("Content of Scene").unwrap().rect;
+    let bottom = point(content.min.x + 60.0, 290.0);
+    for events in drag_events(tab(&h, "Log").center(), bottom, 8) {
+        dock_frame(&mut h, &mut state, &mut viewer, events);
+    }
+    assert_eq!(state.groups().len(), 3);
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    let log = tab(&h, "Log");
+    let scene = tab(&h, "Scene");
+    assert!(
+        log.min.y > scene.max.y + 50.0,
+        "below: {log:?} vs {scene:?}"
+    );
+
+    // Closing: the viewer can refuse.
+    let close = point(scene.max.x - 14.0, scene.center().y);
+    dock_frame(&mut h, &mut state, &mut viewer, click_at(close));
+    assert_eq!(viewer.closed, ["Scene"]);
+    assert_eq!(state.tabs().len(), 3, "kept");
+}
+
+#[test]
+fn dock_split_line_resizes_groups() {
+    let mut h = Harness::new();
+    let mut viewer = Viewer { closed: Vec::new() };
+    let mut state = crate::DockState::new(vec!["Left"]);
+    let root = state.groups()[0];
+    state.split(
+        root,
+        crate::SplitAxis::Horizontal,
+        false,
+        0.5,
+        vec!["Right"],
+    );
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    let right = h.ctx.find_widget("Right").unwrap().rect;
+    let line = point(right.min.x - 4.0, 150.0);
+    for events in drag_events(line, line + vec2(-60.0, 0.0), 4) {
+        dock_frame(&mut h, &mut state, &mut viewer, events);
+    }
+    dock_frame(&mut h, &mut state, &mut viewer, vec![]);
+    let moved = h.ctx.find_widget("Right").unwrap().rect;
+    assert!(
+        (moved.min.x - (right.min.x - 60.0)).abs() < 2.0,
+        "{moved:?} {right:?}"
+    );
+}
