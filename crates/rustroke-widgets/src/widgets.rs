@@ -1026,6 +1026,7 @@ pub struct Image {
     tint: Color,
     sense: Sense,
     alt_text: String,
+    corner_radius: f32,
 }
 
 impl Image {
@@ -1037,6 +1038,7 @@ impl Image {
             tint: Color::WHITE,
             sense: Sense::HOVER,
             alt_text: String::new(),
+            corner_radius: 0.0,
         }
     }
 
@@ -1074,6 +1076,12 @@ impl Image {
         self
     }
 
+    /// Rounds the image's corners (e.g. a viewport in a card).
+    pub fn corner_radius(mut self, radius: f32) -> Self {
+        self.corner_radius = radius;
+        self
+    }
+
     /// Makes the image clickable (e.g. a thumbnail).
     pub fn sense(mut self, sense: Sense) -> Self {
         self.sense = sense;
@@ -1085,7 +1093,8 @@ impl Widget for Image {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let response = ui.allocate_response(self.size, self.sense);
         ui.describe(&response, WidgetInfo::new(WidgetRole::Image, self.alt_text));
-        ui.painter().image(response.rect, self.texture, self.tint);
+        ui.painter()
+            .image_rounded(response.rect, self.corner_radius, self.texture, self.tint);
         response
     }
 }

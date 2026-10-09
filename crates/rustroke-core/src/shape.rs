@@ -120,6 +120,8 @@ pub enum Shape {
         uv: Rect,
         /// Multiplies the image colors; white shows it unchanged.
         tint: Color,
+        /// Rounds the image's corners (anti-aliased); 0 for square ones.
+        corner_radius: f32,
     },
     /// A sequence of connected points.
     ///

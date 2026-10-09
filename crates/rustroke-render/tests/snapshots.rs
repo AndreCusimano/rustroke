@@ -595,6 +595,11 @@ fn images_2x() {
             ui.add(Image::new(&gradient).max_width(32.0));
             ui.add(Image::new(&gradient).tint(Color::from_srgb8(166, 227, 161)));
             ui.add_enabled(false, Image::new(&gradient));
+            ui.add(
+                Image::new(&checker)
+                    .size(vec2(96.0, 64.0))
+                    .corner_radius(12.0),
+            );
         });
     });
     let output = ctx.end_frame();
@@ -1010,5 +1015,96 @@ fn docking_drag_2x() {
     let clear = rustroke_widgets::Style::dark().visuals.background;
     if let Some(pixels) = render_with_clear(&list, size, 2.0, fonts.atlas_mut(), clear) {
         check_snapshot("docking_drag_2x", size, &pixels);
+    }
+}
+
+/// v0.8: a toolbar of tool buttons (one open on its variants) and a
+/// property grid with weights 600 for the header and sections.
+fn inspector_scene(fonts: &mut Fonts, pixels_per_point: f32) -> DisplayList {
+    use rustroke_core::{Event, Modifiers, Point, PointerButton, RawInput};
+    use rustroke_widgets::{
+        CentralPanel, Context, DragValue, Panel, PropertyGrid, ReferenceField, ToolButton, UiRoot,
+    };
+
+    const ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <path d="M4 16 L12 20 L20 16 L12 12 Z" fill="none" stroke="#000" stroke-width="1.6"/>
+      <path d="M12 3 V10" stroke="#1E6FFF" stroke-width="1.8"/></svg>"##;
+    let icon = fonts.add_svg_icon(ICON).unwrap();
+    let screen = Rect::from_min_size(Point::ZERO, vec2(420.0, 300.0));
+    let mut ctx = Context::new();
+    let mut list = DisplayList::new();
+    let (mut length, mut count) = (42.5_f64, 3_u32);
+    let mut tool = 0;
+    let mut time = 0.0;
+    let mut frame = |events: Vec<Event>| {
+        time += 0.5;
+        ctx.begin_frame(RawInput {
+            time,
+            screen_rect: screen,
+            pixels_per_point,
+            events,
+        });
+        let mut root = (&mut ctx, &mut *fonts);
+        let mut arrow = Rect::NOTHING;
+        Panel::top("tools").show(&mut root, |ui| {
+            ui.horizontal(|ui| {
+                arrow = ToolButton::new(icon, "Extrude")
+                    .selected(tool == 0)
+                    .show_with_menu(ui, |ui| {
+                        ui.selectable_value(&mut tool, 0, "Extrude");
+                        ui.selectable_value(&mut tool, 1, "Revolve");
+                    })
+                    .arrow
+                    .rect;
+                ui.separator();
+                ToolButton::new(icon, "Hole").show(ui);
+            });
+        });
+        Panel::right("inspector")
+            .default_size(250.0)
+            .show(&mut root, |ui| {
+                PropertyGrid::new("p")
+                    .header(Some(icon), "Base plate")
+                    .show(ui, |grid| {
+                        grid.section("Parameters", true, |grid| {
+                            grid.row("Length", |ui| {
+                                ui.add(DragValue::new(&mut length).suffix(" mm"))
+                            });
+                            grid.row("Copies", |ui| ui.add(DragValue::new(&mut count)));
+                            grid.row("Sketch", |ui| {
+                                ui.add(ReferenceField::new(Some("Sketch 1")).width(110.0))
+                            });
+                        });
+                        grid.section("Advanced", false, |_| {});
+                    });
+            });
+        let (ctx, fonts) = root.parts();
+        CentralPanel.show(&mut (&mut *ctx, &mut *fonts), |_| {});
+        let mut output = ctx.end_frame();
+        list = std::mem::take(&mut output.shapes);
+        arrow
+    };
+    frame(vec![]);
+    let arrow = frame(vec![]);
+    let b = |pressed| Event::PointerButton {
+        pos: arrow.center(),
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    frame(vec![Event::PointerMoved(arrow.center()), b(true), b(false)]);
+    frame(vec![]);
+    frame(vec![]);
+    list
+}
+
+#[test]
+fn inspector_2x() {
+    let mut fonts = Fonts::bundled_only();
+    let list = inspector_scene(&mut fonts, 2.0);
+    let size = PhysicalSize::new(840, 600);
+    let clear = rustroke_widgets::Style::dark().visuals.background;
+    if let Some(pixels) = render_with_clear(&list, size, 2.0, fonts.atlas_mut(), clear) {
+        check_snapshot("inspector_2x", size, &pixels);
     }
 }

@@ -986,6 +986,15 @@ impl Context {
         self.open_popup = Some(id);
     }
 
+    /// Opens the popup of `id`, or closes it if it is open.
+    pub fn toggle_popup(&mut self, id: Id) {
+        if self.is_popup_open(id) {
+            self.open_popup = None;
+        } else {
+            self.open_popup = Some(id);
+        }
+    }
+
     /// Closes the open popup, if any.
     pub fn close_popup(&mut self) {
         self.open_popup = None;

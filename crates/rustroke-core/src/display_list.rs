@@ -153,6 +153,25 @@ impl DisplayList {
             texture,
             uv,
             tint,
+            corner_radius: 0.0,
+        });
+    }
+
+    /// Draws an image with rounded corners (e.g. a 3D viewport in a card).
+    pub fn image_rounded(
+        &mut self,
+        rect: Rect,
+        corner_radius: f32,
+        texture: crate::TextureId,
+        tint: Color,
+    ) {
+        let uv = Rect::from_min_max(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
+        self.add(Shape::Image {
+            rect,
+            texture,
+            uv,
+            tint,
+            corner_radius,
         });
     }
 

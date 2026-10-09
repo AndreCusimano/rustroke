@@ -198,6 +198,31 @@ impl Tessellator {
             Shape::Text { pos, galley, color } => self.add_text(*pos, galley, *color, mesh),
             // Drawn by the renderer (see `tessellate`), not as triangles.
             Shape::Callback(_) => {}
+            Shape::Image {
+                rect,
+                uv,
+                tint,
+                corner_radius,
+                ..
+            } if *corner_radius > 0.0 => {
+                if tint.a <= 0.0 {
+                    return;
+                }
+                // The rounded outline, anti-aliased like a rectangle, with
+                // texture coordinates following each vertex's position.
+                let first = mesh.vertices.len();
+                self.path.clear();
+                self.add_rounded_rect(*rect, *corner_radius);
+                self.fill_and_stroke(true, *tint, Stroke::NONE, mesh);
+                let size = rect.size();
+                for v in &mut mesh.vertices[first..] {
+                    let t = Vec2::new(
+                        ((v.pos.x - rect.min.x) / size.x.max(f32::EPSILON)).clamp(0.0, 1.0),
+                        ((v.pos.y - rect.min.y) / size.y.max(f32::EPSILON)).clamp(0.0, 1.0),
+                    );
+                    v.uv = [uv.min.x + t.x * uv.width(), uv.min.y + t.y * uv.height()];
+                }
+            }
             Shape::Image { rect, uv, tint, .. } => {
                 if tint.a <= 0.0 {
                     return;
@@ -656,6 +681,37 @@ mod tests {
             (area - expected).abs() / expected < 0.005,
             "{area} vs {expected}"
         );
+    }
+
+    /// LAY-07: rounded images cover a rounded rectangle and map texture
+    /// coordinates by position.
+    #[test]
+    fn rounded_images() {
+        let r = 10.0;
+        let rect = Rect::from_min_size(point(0.0, 0.0), vec2(100.0, 60.0));
+        let mesh = tessellate(
+            Shape::Image {
+                rect,
+                texture: TextureId::User(1),
+                uv: Rect::from_min_max(point(0.0, 0.0), point(1.0, 1.0)),
+                tint: Color::WHITE,
+                corner_radius: r,
+            },
+            1.0,
+        );
+        let expected = 100.0 * 60.0 - (4.0 - std::f32::consts::PI) * r * r;
+        let area = coverage(&mesh);
+        assert!(
+            (area - expected).abs() / expected < 0.005,
+            "{area} vs {expected}"
+        );
+        for v in &mesh.vertices {
+            let expect = [
+                (v.pos.x / 100.0).clamp(0.0, 1.0),
+                (v.pos.y / 60.0).clamp(0.0, 1.0),
+            ];
+            assert!((v.uv[0] - expect[0]).abs() < 1e-5 && (v.uv[1] - expect[1]).abs() < 1e-5);
+        }
     }
 
     #[test]

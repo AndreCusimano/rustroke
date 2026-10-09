@@ -2482,3 +2482,138 @@ fn dock_split_line_resizes_groups() {
         "{moved:?} {right:?}"
     );
 }
+
+// ---- v0.8 ----
+
+/// WID-14: a popup below any rectangle, toggled by the app's own button.
+#[test]
+fn popup_below_an_app_drawn_button() {
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, events| {
+        let mut arrow = None;
+        let mut item = None;
+        let mut open = false;
+        let mut picked = false;
+        h.frame(events, |ui| {
+            let r = ui.add(crate::Button::new("v").frame(false));
+            if r.clicked() {
+                ui.ctx().toggle_popup(r.id);
+            }
+            open = ui
+                .popup_below(r.id, r.rect, |ui| {
+                    let b = ui.button("Revolve");
+                    item = Some(b.rect);
+                    picked = b.clicked();
+                })
+                .is_some();
+            arrow = Some(r.rect);
+        });
+        (arrow.unwrap(), item, open, picked)
+    };
+    let (arrow, ..) = run(&mut h, vec![]);
+    let (_, _, open, _) = run(&mut h, click_at(arrow.center()));
+    assert!(open);
+    let (_, item, ..) = run(&mut h, vec![]);
+    let item = item.unwrap();
+    assert!(item.min.y >= arrow.max.y, "below the anchor");
+    // Clicking the button again closes it (no close-then-reopen).
+    let (_, _, open, _) = run(&mut h, click_at(arrow.center()));
+    assert!(!open);
+    run(&mut h, click_at(arrow.center()));
+    let (_, _, _, picked) = run(&mut h, click_at(item.center()));
+    assert!(picked);
+    let (_, _, open, _) = run(&mut h, vec![]);
+    assert!(!open, "choosing closes it");
+}
+
+/// WID-09: a tool button with a menu of variants.
+#[test]
+fn tool_button_with_variants() {
+    let mut h = Harness::new();
+    let icon = h.fonts.add_svg_icon(TEST_ICON).unwrap();
+    let mut tool = 0;
+    let run = |h: &mut Harness, events, tool: &mut i32| {
+        let mut out = None;
+        let mut items = Vec::new();
+        h.frame(events, |ui| {
+            ui.horizontal(|ui| {
+                let r = crate::ToolButton::new(icon, "Extrude")
+                    .shortcut_text("E")
+                    .selected(*tool == 0)
+                    .show_with_menu(ui, |ui| {
+                        items.push(ui.selectable_value(tool, 0, "Extrude").rect);
+                        items.push(ui.selectable_value(tool, 1, "Revolve").rect);
+                    });
+                out = Some((
+                    r.response.rect,
+                    r.arrow.rect,
+                    r.response.clicked(),
+                    r.inner.is_some(),
+                ));
+            });
+        });
+        let (main, arrow, clicked, open) = out.unwrap();
+        (main, arrow, clicked, open, items)
+    };
+    let (main, arrow, ..) = run(&mut h, vec![], &mut tool);
+    assert_eq!(arrow.min.x, main.max.x, "the arrow sticks to the icon");
+    assert!(h.ctx.find_widget("Extrude").is_some());
+    let (_, _, clicked, open, _) = run(&mut h, click_at(main.center()), &mut tool);
+    assert!(clicked && !open, "the icon uses the tool");
+    let (.., open, _) = run(&mut h, click_at(arrow.center()), &mut tool);
+    assert!(open, "the arrow opens the variants");
+    let (.., items) = run(&mut h, vec![], &mut tool);
+    run(&mut h, click_at(items[1].center()), &mut tool);
+    assert_eq!(tool, 1);
+    let (.., open, _) = run(&mut h, vec![], &mut tool);
+    assert!(!open);
+}
+
+/// WID-11: names aligned across sections, values editable, references
+/// cleared with ×.
+#[test]
+fn property_grid_aligns_values_across_sections() {
+    let mut h = Harness::new();
+    let mut length = 10.0_f64;
+    let mut reference = Some("Sketch 1");
+    let run = |h: &mut Harness, events, length: &mut f64, reference: &mut Option<&str>| {
+        let mut values = Vec::new();
+        let mut field = None;
+        h.frame(events, |ui| {
+            crate::PropertyGrid::new("props")
+                .header(None, "Base plate")
+                .show(ui, |grid| {
+                    grid.section("General", true, |grid| {
+                        values.push(grid.row("Name", |ui| ui.label("Base plate")).rect);
+                    });
+                    grid.section("Parameters", true, |grid| {
+                        values.push(
+                            grid.row("A much longer name", |ui| {
+                                ui.add(crate::DragValue::new(length))
+                            })
+                            .rect,
+                        );
+                        let r = grid.row("Sketch", |ui| {
+                            ui.add(crate::ReferenceField::new(*reference).width(150.0))
+                        });
+                        if r.changed() {
+                            *reference = None;
+                        }
+                        field = Some(r.rect);
+                    });
+                    grid.section("Advanced", false, |grid| {
+                        grid.row("Hidden", |ui| ui.label("x"));
+                    });
+                });
+        });
+        (values, field.unwrap())
+    };
+    let _ = run(&mut h, vec![], &mut length, &mut reference);
+    let (values, field) = run(&mut h, vec![], &mut length, &mut reference);
+    assert_eq!(values[0].min.x, values[1].min.x, "one value column");
+    assert!(h.ctx.find_widget("Base plate").is_some());
+    assert!(h.ctx.find_widget("Hidden").is_none(), "closed section");
+    let clear = point(field.max.x - 14.0, field.center().y);
+    run(&mut h, click_at(clear), &mut length, &mut reference);
+    assert_eq!(reference, None);
+}

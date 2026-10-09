@@ -26,10 +26,12 @@ mod id;
 mod layout;
 mod list;
 mod popup;
+mod property_grid;
 mod response;
 mod style;
 mod tabs;
 mod text_edit;
+mod tool_button;
 mod ui;
 pub mod widgets;
 
@@ -46,10 +48,12 @@ pub use grid::Grid;
 pub use id::Id;
 pub use layout::{Align, Direction, Layout};
 pub use list::{List, ListResponse};
+pub use property_grid::{PropertyGrid, PropertyGridUi, ReferenceField};
 pub use response::{FocusLost, Response};
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
 pub use tabs::{TabBar, TabBarResponse, TabLabel};
 pub use text_edit::TextEdit;
+pub use tool_button::{ToolButton, ToolButtonResponse};
 pub use ui::{InnerResponse, Ui};
 pub use widgets::{
     Button, Checkbox, Icon, Image, Label, Numeric, ProgressBar, RadioButton, SelectableLabel,

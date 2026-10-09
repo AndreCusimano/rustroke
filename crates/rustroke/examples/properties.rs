@@ -6,8 +6,8 @@
 //! Run with: `cargo run -p rustroke --example properties`
 
 use rustroke::{
-    App, CentralPanel, CollapsingHeader, ComboBox, DragValue, Frame, Grid, Key, KeyboardShortcut,
-    Modifiers, Panel, ProgressBar, Spinner, TextEdit, WindowOptions,
+    App, CentralPanel, CollapsingHeader, ComboBox, DragValue, Frame, Key, KeyboardShortcut,
+    Modifiers, Panel, ProgressBar, PropertyGrid, ReferenceField, Spinner, TextEdit, WindowOptions,
 };
 
 const SAVE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
@@ -34,6 +34,7 @@ struct Feature {
     length: f64,
     angle: f64,
     count: u32,
+    sketch: Option<String>,
 }
 
 struct Demo {
@@ -145,76 +146,84 @@ impl App for Demo {
                 ui.label("No feature selected");
                 return;
             };
-            ui.heading(&feature.name);
-            CollapsingHeader::new("General")
-                .default_open(true)
-                .show(ui, |ui| {
-                    Grid::new("general").show(ui, |ui| {
-                        ui.label("Name");
-                        ui.add(
-                            TextEdit::singleline(&mut feature.name)
-                                .select_all_on_focus(true)
-                                .desired_width(180.0),
-                        );
-                        ui.end_row();
-                        ui.label("Operation");
-                        ComboBox::from_id_salt("operation")
-                            .selected_text(format!("{:?}", feature.operation))
-                            .width(180.0)
-                            .show_ui(ui, |ui| {
-                                for op in [Operation::Extrude, Operation::Revolve, Operation::Cut] {
-                                    ui.selectable_value(
-                                        &mut feature.operation,
-                                        op,
-                                        format!("{op:?}"),
-                                    );
-                                }
-                            });
-                        ui.end_row();
+            let header = feature.name.clone();
+            PropertyGrid::new("inspector")
+                .header(None, header)
+                .show(ui, |grid| {
+                    grid.section("General", true, |grid| {
+                        grid.row("Name", |ui| {
+                            ui.add(
+                                TextEdit::singleline(&mut feature.name)
+                                    .select_all_on_focus(true)
+                                    .desired_width(180.0),
+                            )
+                        });
+                        grid.row("Operation", |ui| {
+                            ComboBox::from_id_salt("operation")
+                                .selected_text(format!("{:?}", feature.operation))
+                                .width(180.0)
+                                .show_ui(ui, |ui| {
+                                    for op in
+                                        [Operation::Extrude, Operation::Revolve, Operation::Cut]
+                                    {
+                                        ui.selectable_value(
+                                            &mut feature.operation,
+                                            op,
+                                            format!("{op:?}"),
+                                        );
+                                    }
+                                });
+                        });
+                    });
+                    grid.section("Parameters", true, |grid| {
+                        grid.row("Length", |ui| {
+                            ui.add(
+                                DragValue::new(&mut feature.length)
+                                    .speed(0.5)
+                                    .range(0.0..=1000.0)
+                                    .suffix(" mm"),
+                            )
+                        });
+                        grid.row("Angle", |ui| {
+                            ui.add(
+                                DragValue::new(&mut feature.angle)
+                                    .speed(1.0)
+                                    .range(-360.0..=360.0)
+                                    .suffix("°"),
+                            )
+                        });
+                        grid.row("Axis", |ui| {
+                            ComboBox::from_id_salt("axis")
+                                .selected_text(format!("{:?}", feature.axis))
+                                .width(80.0)
+                                .show_ui(ui, |ui| {
+                                    for axis in [Axis::X, Axis::Y, Axis::Z] {
+                                        ui.selectable_value(
+                                            &mut feature.axis,
+                                            axis,
+                                            format!("{axis:?}"),
+                                        );
+                                    }
+                                });
+                        });
+                        grid.row("Number of copies", |ui| {
+                            ui.add(DragValue::new(&mut feature.count).range(1..=50).speed(0.1))
+                        });
+                        grid.row("Sketch", |ui| {
+                            let r =
+                                ui.add(ReferenceField::new(feature.sketch.as_deref()).width(180.0));
+                            if r.changed() {
+                                feature.sketch = None;
+                            }
+                            if r.clicked() {
+                                feature.sketch = Some("Sketch 1".into());
+                            }
+                        });
+                    });
+                    grid.section("Advanced", false, |grid| {
+                        grid.row("Notes", |ui| ui.label("Nothing here yet."));
                     });
                 });
-            CollapsingHeader::new("Parameters")
-                .default_open(true)
-                .show(ui, |ui| {
-                    Grid::new("parameters").show(ui, |ui| {
-                        ui.label("Length");
-                        ui.add(
-                            DragValue::new(&mut feature.length)
-                                .speed(0.5)
-                                .range(0.0..=1000.0)
-                                .suffix(" mm"),
-                        );
-                        ui.end_row();
-                        ui.label("Angle");
-                        ui.add(
-                            DragValue::new(&mut feature.angle)
-                                .speed(1.0)
-                                .range(-360.0..=360.0)
-                                .suffix("°"),
-                        );
-                        ui.end_row();
-                        ui.label("Axis");
-                        ComboBox::from_id_salt("axis")
-                            .selected_text(format!("{:?}", feature.axis))
-                            .width(80.0)
-                            .show_ui(ui, |ui| {
-                                for axis in [Axis::X, Axis::Y, Axis::Z] {
-                                    ui.selectable_value(
-                                        &mut feature.axis,
-                                        axis,
-                                        format!("{axis:?}"),
-                                    );
-                                }
-                            });
-                        ui.end_row();
-                        ui.label("Count");
-                        ui.add(DragValue::new(&mut feature.count).range(1..=50).speed(0.1));
-                        ui.end_row();
-                    });
-                });
-            CollapsingHeader::new("Advanced").show(ui, |ui| {
-                ui.label("Nothing here yet.");
-            });
         });
     }
 }
@@ -227,6 +236,7 @@ fn main() -> Result<(), rustroke::RunError> {
         length,
         angle: 0.0,
         count: 1,
+        sketch: Some("Sketch 1".into()),
     };
     rustroke::run(
         WindowOptions {

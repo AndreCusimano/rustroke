@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-09
+
+### Added
+
+- **Font weights**: `TextStyle::weight` (100–900; 500 medium, 600
+  semibold...) and `TextStyle::weight(..)`; `bold` still means at least
+  700. The bundled Inter is now the variable font, so every weight is
+  exact.
+- **The platform's UI font**: `FontFamily::System` / `TextStyle::system(size)`
+  (SF Pro on macOS, Segoe UI on Windows, a common desktop font on Linux;
+  Inter when unavailable). `Fonts::system_family()` tells which one.
+- **Popups below any rectangle**: `Ui::popup_below(id, anchor, ..)` and
+  `popup_below_with_width`, with `Context::toggle_popup(id)`, for menus
+  opened by buttons the app draws itself.
+- **Tool buttons**: `ToolButton::new(icon, label).shortcut_text(..)
+  .selected(..)` with `show(ui)` or `show_with_menu(ui, ..)` (a ▾ opening
+  the tool's variants); the tooltip shows the name and shortcut.
+- **Property grids**: `PropertyGrid::new(id).header(icon, name).show(ui,
+  |grid| ..)` with `grid.section(title, default_open, ..)` and
+  `grid.row(name, |ui| value)`: names aligned in one column across all
+  sections. `ReferenceField` shows a reference with a × to clear it.
+- **Rounded images**: `Image::corner_radius(..)`,
+  `DisplayList::image_rounded(..)` and `Shape::Image::corner_radius`
+  (anti-aliased, e.g. a 3D viewport in a card).
+- `CollapsingHeader::text_style(..)`.
+
+### Changed
+
+- The bundled font file is `InterVariable.ttf` (family "Inter Variable")
+  instead of Inter Regular and Bold; text looks the same.
+- `Shape::Image` has a new field, `corner_radius`.
+
 ## [0.7.0] — 2026-10-09
 
 ### Added
@@ -251,7 +283,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/AndreCusimano/rustroke/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/AndreCusimano/rustroke/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AndreCusimano/rustroke/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AndreCusimano/rustroke/compare/v0.4.0...v0.5.0

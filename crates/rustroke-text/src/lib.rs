@@ -25,10 +25,20 @@ use cosmic_text::{
 };
 use rustroke_core::{AtlasRegion, Color, Galley, GalleyRow, GlyphQuad, TextureAtlas, Vec2};
 
-const INTER_REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
-const INTER_BOLD: &[u8] = include_bytes!("../fonts/Inter-Bold.ttf");
+/// Inter as a variable font: every weight from 100 to 900 in one file.
+const INTER: &[u8] = include_bytes!("../fonts/InterVariable.ttf");
 const SYMBOLS: &[u8] = include_bytes!("../fonts/RustrokeSymbols-Regular.ttf");
-const PROPORTIONAL_FAMILY: &str = "Inter";
+const PROPORTIONAL_FAMILY: &str = "Inter Variable";
+
+/// Families tried, in order, for [`FontFamily::System`].
+const SYSTEM_FAMILIES: &[&str] = if cfg!(target_os = "macos") {
+    // SF Pro; the system file (SFNS.ttf) has a hidden family name.
+    &[".SF NS", "SF Pro", "SF Pro Text", "Helvetica Neue"]
+} else if cfg!(target_os = "windows") {
+    &["Segoe UI Variable Text", "Segoe UI"]
+} else {
+    &["Cantarell", "Ubuntu", "Noto Sans", "DejaVu Sans"]
+};
 
 /// Initial atlas side; it doubles when full, up to [`MAX_ATLAS_SIZE`].
 const INITIAL_ATLAS_SIZE: u32 = 1024;
@@ -42,6 +52,10 @@ pub enum FontFamily {
     Proportional,
     /// The platform's monospace font.
     Monospace,
+    /// The platform's user interface font: SF Pro on macOS, Segoe UI on
+    /// Windows, a common desktop font on Linux. Falls back to Inter when it
+    /// is not available (e.g. with `Fonts::bundled_only`).
+    System,
     /// Any installed font, by family name.
     Name(String),
 }
@@ -53,7 +67,11 @@ pub struct TextStyle {
     pub family: FontFamily,
     /// Font size in logical points.
     pub size: f32,
-    /// Use the bold weight.
+    /// Weight from 100 (thin) to 900 (black): 400 regular, 500 medium,
+    /// 600 semibold, 700 bold. Variable fonts (the bundled Inter, SF Pro)
+    /// have every weight; others use the nearest one they have.
+    pub weight: u16,
+    /// Bold: at least weight 700, whatever `weight` says.
     pub bold: bool,
     /// Distance between baselines, as a multiple of `size`.
     pub line_height: f32,
@@ -71,8 +89,36 @@ impl TextStyle {
         Self {
             family: FontFamily::Proportional,
             size,
+            weight: 400,
             bold: false,
             line_height: 1.3,
+        }
+    }
+
+    /// The platform's user interface font at `size` points (see
+    /// [`FontFamily::System`]).
+    pub fn system(size: f32) -> Self {
+        Self {
+            family: FontFamily::System,
+            ..Self::proportional(size)
+        }
+    }
+
+    /// The same style with weight `weight` (e.g. 500 for medium, 600 for
+    /// semibold).
+    pub fn weight(self, weight: u16) -> Self {
+        Self {
+            weight: weight.clamp(1, 1000),
+            ..self
+        }
+    }
+
+    /// The weight used for drawing: `weight`, raised to 700 if `bold`.
+    pub fn effective_weight(&self) -> u16 {
+        if self.bold {
+            self.weight.max(700)
+        } else {
+            self.weight
         }
     }
 
@@ -92,7 +138,7 @@ impl TextStyle {
     fn hash_into(&self, state: &mut impl Hasher) {
         self.family.hash(state);
         self.size.to_bits().hash(state);
-        self.bold.hash(state);
+        self.effective_weight().hash(state);
         self.line_height.to_bits().hash(state);
     }
 }
@@ -121,6 +167,8 @@ pub struct Fonts {
     hasher: std::hash::RandomState,
     icons: Vec<icons::IconSource>,
     icon_cache: icons::IconCache,
+    /// What [`FontFamily::System`] means here.
+    system_family: String,
 }
 
 impl std::fmt::Debug for Fonts {
@@ -147,7 +195,22 @@ impl Fonts {
         load_bundled(db);
         db.set_monospace_family(platform_monospace());
         db.set_sans_serif_family(PROPORTIONAL_FAMILY);
-        Self::with_font_system(system)
+        let system_family = SYSTEM_FAMILIES
+            .iter()
+            .find(|name| {
+                db.faces()
+                    .any(|f| f.families.iter().any(|(family, _)| family == *name))
+            })
+            .map_or(PROPORTIONAL_FAMILY, |name| name)
+            .to_owned();
+        let mut fonts = Self::with_font_system(system);
+        fonts.system_family = system_family;
+        fonts
+    }
+
+    /// The family [`FontFamily::System`] resolves to on this machine.
+    pub fn system_family(&self) -> &str {
+        &self.system_family
     }
 
     /// Only the bundled fonts: deterministic output on every machine, and
@@ -171,6 +234,7 @@ impl Fonts {
             hasher: std::hash::RandomState::new(),
             icons: Vec::new(),
             icon_cache: HashMap::new(),
+            system_family: PROPORTIONAL_FAMILY.to_owned(),
         }
     }
 
@@ -231,14 +295,11 @@ impl Fonts {
         buffer.set_size(wrap_width, None);
         let family = match &style.family {
             FontFamily::Proportional => Family::Name(PROPORTIONAL_FAMILY),
+            FontFamily::System => Family::Name(&self.system_family),
             FontFamily::Monospace => Family::Monospace,
             FontFamily::Name(name) => Family::Name(name),
         };
-        let weight = if style.bold {
-            Weight::BOLD
-        } else {
-            Weight::NORMAL
-        };
+        let weight = Weight(style.effective_weight());
         let attrs = Attrs::new().family(family).weight(weight);
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.system, false);
@@ -401,8 +462,7 @@ fn row_carets(base: usize, run: &cosmic_text::LayoutRun<'_>) -> GalleyRow {
 }
 
 fn load_bundled(db: &mut cosmic_text::fontdb::Database) {
-    db.load_font_data(INTER_REGULAR.to_vec());
-    db.load_font_data(INTER_BOLD.to_vec());
+    db.load_font_data(INTER.to_vec());
     // Found by font fallback for characters Inter doesn't have.
     db.load_font_data(SYMBOLS.to_vec());
 }
@@ -512,6 +572,29 @@ mod tests {
         // ...but glyphs are rasterized at twice the resolution.
         let height = |g: &Galley| g.glyphs.iter().map(|q| q.region.height).max().unwrap();
         assert!(height(&b) >= 2 * height(&a) - 1);
+    }
+
+    #[test]
+    fn weights_between_regular_and_bold() {
+        let mut fonts = fonts();
+        let width = |fonts: &mut Fonts, w: u16| {
+            let style = TextStyle::proportional(16.0).weight(w);
+            fonts.layout("Weight", &style, None, 1.0).size.x
+        };
+        let (w400, w500, w600, w700) = (
+            width(&mut fonts, 400),
+            width(&mut fonts, 500),
+            width(&mut fonts, 600),
+            width(&mut fonts, 700),
+        );
+        assert!(
+            w400 < w500 && w500 < w600 && w600 < w700,
+            "{w400} {w500} {w600} {w700}"
+        );
+        assert_eq!(TextStyle::proportional(16.0).bold().effective_weight(), 700);
+        // Without system fonts, the system family is Inter.
+        let system = fonts.layout("Weight", &TextStyle::system(16.0), None, 1.0);
+        assert_eq!(system.size.x, w400);
     }
 
     #[test]

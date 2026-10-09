@@ -39,6 +39,7 @@ pub struct CollapsingHeader {
     open: Option<bool>,
     selected: Option<bool>,
     icon: Option<rustroke_text::IconId>,
+    text_style: Option<rustroke_text::TextStyle>,
 }
 
 impl CollapsingHeader {
@@ -52,6 +53,7 @@ impl CollapsingHeader {
             open: None,
             selected: None,
             icon: None,
+            text_style: None,
         }
     }
 
@@ -83,6 +85,12 @@ impl CollapsingHeader {
         self
     }
 
+    /// The header's text style (default: the body style).
+    pub fn text_style(mut self, style: rustroke_text::TextStyle) -> Self {
+        self.text_style = Some(style);
+        self
+    }
+
     /// Shows a 16 point icon before the text (see `Fonts::add_svg_icon`).
     pub fn icon(mut self, icon: rustroke_text::IconId) -> Self {
         self.icon = Some(icon);
@@ -105,7 +113,11 @@ impl CollapsingHeader {
 
         // Header: triangle, then the text.
         let icon = style.spacing.icon_size;
-        let galley = ui.layout_text(&self.text, &style.body, None);
+        let text_style = self
+            .text_style
+            .clone()
+            .unwrap_or_else(|| style.body.clone());
+        let galley = ui.layout_text(&self.text, &text_style, None);
         let header_icon = self.icon.and_then(|i| ui.rasterize_icon(i, 16.0));
         let icon_width = header_icon.as_ref().map_or(0.0, |i| i.size.x + 6.0);
         let height = style.spacing.interact_height;

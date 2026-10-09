@@ -85,7 +85,9 @@ fn main() -> Result<(), rustroke::RunError> {
   sliders, drag values (drag or type a number), combo boxes, progress bars,
   spinners, lists that can be selected and reordered by dragging, single and
   multi-line text fields (selection, clipboard, undo, word navigation, input
-  methods for accented and Asian text), images, SVG icons, separators. Any
+  methods for accented and Asian text), images (also with rounded corners),
+  SVG icons, toolbar buttons with menus of variants, property grids,
+  separators. Any
   widget can be disabled.
 - **Layout**: rows, columns, alignment, wrapping, fixed-size widgets, grids
   with aligned columns.
@@ -95,7 +97,8 @@ fn main() -> Result<(), rustroke::RunError> {
   trees, tab bars, dockable panels (drag tabs between groups or to a side to
   split), tooltips.
 - **Text**: shaping, bidirectional text and wrapping via cosmic-text. The Inter
-  font and a symbol font (arrows, math, technical symbols) are bundled; system
+  font (variable: every weight from thin to black), the platform's UI font
+  (SF Pro, Segoe UI) on request, and a symbol font (arrows, math, technical symbols) are bundled; system
   fonts are used for emoji and other scripts.
 - **Icons**: SVG icons rasterized at any size and screen density, recolored
   from the theme (line and accent colors), so one icon set fits light and
@@ -193,7 +196,7 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.7: the core is complete and tested (interaction tests without a
+Version 0.8: the core is complete and tested (interaction tests without a
 window, GPU snapshot tests, CI on macOS, Windows and Linux). Known limitations
 are listed in the [changelog](CHANGELOG.md). Coming next: extending and
 customizing shapes, and a visual screen designer built with Rustroke itself.

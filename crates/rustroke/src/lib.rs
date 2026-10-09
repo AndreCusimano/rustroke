@@ -62,7 +62,9 @@
 //!   [`Ui::radio_value`], [`Ui::selectable_value`], [`Slider`],
 //!   [`DragValue`] (drag or type a number), [`ComboBox`] (drop-down list),
 //!   [`TextEdit`], [`Image`], [`Icon`], [`ProgressBar`], [`Spinner`],
-//!   [`List`] (rows to select and reorder by dragging),
+//!   [`List`] (rows to select and reorder by dragging), [`ToolButton`]
+//!   (toolbar icon with a menu of variants), [`PropertyGrid`] (name / value
+//!   rows in collapsible sections) and [`ReferenceField`],
 //!   [`Ui::separator`]; any widget can be disabled with
 //!   [`Ui::add_enabled`]. Implement [`Widget`] for your own.
 //! - **Layout**: a [`Ui`] stacks widgets top to bottom. Use
@@ -70,7 +72,8 @@
 //!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables.
 //! - **Containers**: [`Panel`] (top/bottom/left/right bars), the central
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
-//!   [`ScrollArea`] (vertical, horizontal or both), popup menus ([`Ui::menu_button`]), context menus
+//!   [`ScrollArea`] (vertical, horizontal or both), popup menus (also
+//!   below any rectangle: [`Ui::popup_below`]) ([`Ui::menu_button`]), context menus
 //!   ([`Response::context_menu`]), collapsible sections and trees
 //!   ([`CollapsingHeader`]), tab bars ([`TabBar`]), dockable panels
 //!   ([`DockArea`]: tab groups in resizable splits, rearranged by dragging
@@ -82,8 +85,10 @@
 //!   [`InputState::consume_shortcut`] and shown in menus with
 //!   [`Button::shortcut_text`]. Skip them while
 //!   [`Context::wants_keyboard_input`] (the user is typing).
-//! - **Text**: all text uses the bundled Inter font, with system fonts as
-//!   fallback for other scripts and emoji. Fields support selection,
+//! - **Text**: all text uses the bundled Inter font (every weight, e.g.
+//!   `TextStyle::proportional(14.0).weight(600)`) or the platform's UI font
+//!   ([`TextStyle::system`]), with system fonts as fallback for other
+//!   scripts and emoji. Fields support selection,
 //!   clipboard, undo/redo and input methods (IME); Escape cancels an edit and
 //!   [`Response::lost_focus_reason`] tells why editing ended.
 //! - **Style**: [`Style::dark`] / [`Style::light`], changed at runtime with
@@ -148,10 +153,11 @@ pub use rustroke_widgets::{
     Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, ComboBox, Context,
     CursorIcon, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
     FrameOutput, Grid, Icon, Id, InnerResponse, Label, LayerId, Layout, List, ListResponse,
-    Numeric, Order, Panel, PanelSide, ProgressBar, RadioButton, RepaintHandle, Response,
-    ScrollArea, SelectableLabel, Sense, Separator, Slider, Spinner, SplitAxis, Style, TabBar,
-    TabBarResponse, TabLabel, TextEdit, TextureHandle, Ui, UiRoot, Visuals, Widget,
-    WidgetDescription, WidgetInfo, WidgetRole, Window,
+    Numeric, Order, Panel, PanelSide, ProgressBar, PropertyGrid, PropertyGridUi, RadioButton,
+    ReferenceField, RepaintHandle, Response, ScrollArea, SelectableLabel, Sense, Separator, Slider,
+    Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, TextEdit, TextureHandle,
+    ToolButton, ToolButtonResponse, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo,
+    WidgetRole, Window,
 };
 pub use rustroke_winit::{
     App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,

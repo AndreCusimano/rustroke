@@ -113,6 +113,51 @@ pub(crate) fn show_popup<R>(
     show_floating(ui, floating, add_contents)
 }
 
+impl Ui<'_> {
+    /// Shows the popup `id` below `anchor` while it is open (see
+    /// [`crate::Context::toggle_popup`]), e.g. a menu opened by a button
+    /// the app draws itself. Returns what `add_contents` returned while
+    /// open. It closes like other menus: choosing a button or selectable
+    /// item inside it, clicking elsewhere or pressing Escape.
+    ///
+    /// Use the id of the widget that opens it, so clicking that widget
+    /// again closes the popup instead of reopening it:
+    ///
+    /// ```ignore
+    /// let arrow = ui.add(Button::new("▾").frame(false));
+    /// if arrow.clicked() {
+    ///     ui.ctx().toggle_popup(arrow.id);
+    /// }
+    /// ui.popup_below(arrow.id, arrow.rect, |ui| {
+    ///     ui.button("Revolve");
+    /// });
+    /// ```
+    pub fn popup_below<R>(
+        &mut self,
+        id: Id,
+        anchor: Rect,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> Option<R> {
+        self.popup_below_with_width(id, anchor, 0.0, add_contents)
+    }
+
+    /// Like [`Ui::popup_below`], at least `min_width` points wide.
+    pub fn popup_below_with_width<R>(
+        &mut self,
+        id: Id,
+        anchor: Rect,
+        min_width: f32,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> Option<R> {
+        if !self.ctx().is_popup_open(id) {
+            return None;
+        }
+        // The popup may belong to no widget: don't forget it.
+        self.ctx().keep_alive(id);
+        Some(show_popup(self, id, anchor, min_width, add_contents))
+    }
+}
+
 impl Response {
     /// Opens a popup menu at the pointer when the widget is clicked with
     /// the secondary (right) mouse button. Returns what `add_contents`
