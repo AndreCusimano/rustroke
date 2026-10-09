@@ -68,8 +68,8 @@ pub use tool_button::{IconToggle, ToolButton, ToolButtonResponse};
 pub use tree::{Tree, TreeResponse};
 pub use ui::{InnerResponse, Ui};
 pub use widgets::{
-    Button, Checkbox, Hyperlink, Icon, Image, Label, Numeric, ProgressBar, RadioButton,
-    SelectableLabel, Separator, Slider, Spinner, Widget,
+    AnimatedImage, AnimatedTexture, Button, Checkbox, Hyperlink, Icon, Image, Label, Numeric,
+    ProgressBar, RadioButton, SelectableLabel, Separator, Slider, Spinner, Widget,
 };
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use rustroke_core::{Color, Stroke, Vec2};
+use rustroke_core::{Color, Shadow, Stroke, Vec2};
 use rustroke_text::TextStyle;
 
 use crate::Response;
@@ -110,8 +110,8 @@ pub struct Visuals {
     pub window_stroke: Stroke,
     /// Corner radius of floating content.
     pub window_corner_radius: f32,
-    /// Shadow under floating content.
-    pub shadow: Color,
+    /// Soft shadow under floating content (windows, menus, dialogs).
+    pub shadow: Shadow,
     /// Veil over the rest of the window behind a [`crate::Modal`].
     pub modal_backdrop: Color,
     /// Inside text fields.
@@ -188,7 +188,12 @@ impl Visuals {
             window_fill: rgb(36, 36, 54),
             window_stroke: Stroke::new(1.0, rgb(69, 71, 90)),
             window_corner_radius: 10.0,
-            shadow: Color::new(0.0, 0.0, 0.0, 0.35),
+            shadow: Shadow {
+                offset: Vec2::new(0.0, 6.0),
+                blur: 18.0,
+                spread: 0.0,
+                color: Color::new(0.0, 0.0, 0.0, 0.45),
+            },
             modal_backdrop: Color::new(0.0, 0.0, 0.0, 0.45),
             text_field_fill: rgb(24, 24, 37),
             text,
@@ -237,7 +242,12 @@ impl Visuals {
             window_fill: rgb(250, 251, 252),
             window_stroke: Stroke::new(1.0, rgb(204, 208, 218)),
             window_corner_radius: 10.0,
-            shadow: Color::new(0.0, 0.0, 0.0, 0.18),
+            shadow: Shadow {
+                offset: Vec2::new(0.0, 6.0),
+                blur: 18.0,
+                spread: 0.0,
+                color: Color::new(0.0, 0.0, 0.0, 0.2),
+            },
             modal_backdrop: Color::new(0.0, 0.0, 0.0, 0.25),
             text_field_fill: rgb(255, 255, 255),
             text,

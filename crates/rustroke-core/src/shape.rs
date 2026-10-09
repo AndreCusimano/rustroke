@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use crate::{Color, Galley, Point, Rect, TextureId};
+use crate::{Color, Galley, Gradient, Mesh, Point, Rect, Shadow, TextureId, Transform};
 
 /// The outline of a shape: a width in logical points and a color.
 ///
@@ -138,6 +138,37 @@ pub enum Shape {
     },
     /// Drawing done by the renderer itself (see [`PaintCallback`]).
     Callback(PaintCallback),
+    /// `shape` (a rectangle, circle or convex path) whose fill is a
+    /// gradient instead of its fill color; the fill color's alpha still
+    /// applies. Its stroke is drawn as usual.
+    Gradient {
+        /// The shape to fill.
+        shape: Box<Shape>,
+        /// The colors.
+        gradient: Gradient,
+    },
+    /// A soft shadow under the rounded rectangle `rect`.
+    Shadow {
+        /// The rectangle casting it (before offset and spread).
+        rect: Rect,
+        /// Corner radius of that rectangle.
+        corner_radius: f32,
+        /// Offset, blur, spread and color.
+        shadow: Shadow,
+    },
+    /// Triangles built by the app (vertices in logical points,
+    /// premultiplied colors), drawn as they are.
+    Mesh(Arc<Mesh>),
+    /// Laid out text drawn through `transform` (rotated, scaled or
+    /// sheared): galley coordinates map to the screen with `transform`.
+    TransformedText {
+        /// The laid out, rasterized text.
+        galley: Arc<Galley>,
+        /// From galley coordinates (origin at its top-left) to the screen.
+        transform: Transform,
+        /// Text color.
+        color: Color,
+    },
 }
 
 impl Shape {
@@ -157,6 +188,14 @@ impl Shape {
             Self::Image { tint, .. } => fade(tint),
             // Custom drawing can't be faded from here.
             Self::Callback(_) => {}
+            Self::Gradient { shape, .. } => shape.multiply_alpha(factor),
+            Self::Shadow { shadow, .. } => fade(&mut shadow.color),
+            Self::Mesh(mesh) => {
+                for v in &mut Arc::make_mut(mesh).vertices {
+                    v.color = v.color.map(|c| c * factor);
+                }
+            }
+            Self::TransformedText { color, .. } => fade(color),
         }
     }
 
@@ -183,6 +222,30 @@ impl Shape {
                 .iter()
                 .fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(*p, *p)))
                 .expand(half_width(stroke)),
+            Self::Gradient { shape, .. } => shape.bounding_rect(),
+            Self::Shadow {
+                rect, shadow: s, ..
+            } => {
+                let r = Rect::from_min_max(rect.min + s.offset, rect.max + s.offset);
+                r.expand(s.spread + s.blur)
+            }
+            Self::Mesh(mesh) => mesh.vertices.iter().fold(Rect::NOTHING, |r, v| {
+                r.union(Rect::from_min_max(v.pos, v.pos))
+            }),
+            Self::TransformedText {
+                galley, transform, ..
+            } => {
+                let r = galley.bounding_rect();
+                [
+                    r.min,
+                    Point::new(r.max.x, r.min.y),
+                    r.max,
+                    Point::new(r.min.x, r.max.y),
+                ]
+                .into_iter()
+                .map(|p| transform.apply(p))
+                .fold(Rect::NOTHING, |acc, p| acc.union(Rect::from_min_max(p, p)))
+            }
         }
     }
 }

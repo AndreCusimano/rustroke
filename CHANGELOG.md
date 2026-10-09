@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-09
+
+### Added
+
+- **Gradients**: `Gradient::linear` / `Gradient::radial` with any number
+  of stops (`with_stop`), drawn with `DisplayList::rect_gradient`,
+  `circle_gradient`, `polygon_gradient` or `gradient_fill` (new
+  `Shape::Gradient`). Linear gradients are exact (triangles are cut at
+  every stop); radial ones are subdivided finely.
+- **Soft shadows**: `Shadow { offset, blur, spread, color }` and
+  `DisplayList::shadow(rect, radius, shadow)` (new `Shape::Shadow`), a
+  Gaussian-like blur built from rings of vertices. Windows, menus,
+  tooltips and dialogs use it (`Visuals::shadow`).
+- **Lines and curves**: `DisplayList::dashed_line`, `dotted_line`,
+  `quadratic_bezier`, `cubic_bezier`; `dashes`, `quadratic_bezier_points`,
+  `cubic_bezier_points`.
+- **Transforms**: `Transform` (translate, rotate, scale, `from_axes`,
+  `then`) and `DisplayList::with_transform(t, |list| ..)` rotates, scales
+  or shears everything drawn inside, text and images included.
+- **Transformed text** (CAD3D TXT-06): `DisplayList::galley_transformed(galley,
+  transform, color)` (new `Shape::TransformedText`), e.g. labels on the
+  faces of a view cube.
+- **App meshes**: `Shape::Mesh` / `DisplayList::mesh` draw triangles built
+  by the app, with any texture.
+- **Animated images**: `rustroke::load_animated_image` decodes GIF, APNG
+  and animated WebP; `AnimatedTexture` holds the frames on the GPU and
+  `AnimatedImage` plays them, drawing frames only when one is due.
+- New `graphics` example.
+
+### Changed
+
+- `Visuals::shadow` is a `Shadow` (offset, blur, spread, color) instead of
+  a color; floating content casts a softer, wider shadow.
+- `Shape` has new variants (`Gradient`, `Shadow`, `Mesh`,
+  `TransformedText`); the `image` feature also decodes GIF and WebP.
+
 ## [0.11.0] — 2026-10-09
 
 ### Added
@@ -418,7 +454,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/AndreCusimano/rustroke/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/AndreCusimano/rustroke/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/AndreCusimano/rustroke/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/AndreCusimano/rustroke/compare/v0.8.0...v0.9.0

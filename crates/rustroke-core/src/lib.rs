@@ -7,6 +7,7 @@ mod display_list;
 mod galley;
 mod geometry;
 pub mod input;
+mod paint;
 mod shape;
 pub mod tessellator;
 mod texture;
@@ -19,6 +20,9 @@ pub use geometry::{PhysicalSize, Point, Rect, Vec2, point, vec2};
 pub use input::{
     Event, ImeEvent, InputState, Key, KeyboardShortcut, Modifiers, POINTS_PER_SCROLL_LINE,
     PointerButton, RawInput,
+};
+pub use paint::{
+    Gradient, GradientKind, Shadow, Transform, cubic_bezier_points, dashes, quadratic_bezier_points,
 };
 pub use shape::{PaintCallback, Shape, Stroke};
 pub use tessellator::{ClippedMesh, Mesh, Tessellator, Vertex};

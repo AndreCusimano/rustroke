@@ -112,7 +112,10 @@ fn main() -> Result<(), rustroke::RunError> {
   from the theme (line and accent colors), so one icon set fits light and
   dark themes.
 - **Drawing**: anti-aliased rectangles (rounded), circles, lines, polygons,
-  text and images, pixel-aligned on HiDPI screens.
+  text and images, pixel-aligned on HiDPI screens; linear and radial
+  gradients, soft shadows, dashed and dotted lines, Bézier curves, 2D
+  transforms (rotated and sheared shapes, text and images), custom meshes
+  and animated images (GIF, APNG, WebP).
 - **Style**: dark and light themes, accent colors, animated transitions,
   changeable at runtime.
 - **Accessibility**: screen readers (VoiceOver, Narrator, Orca) through
@@ -158,6 +161,7 @@ cargo run -p rustroke --example layout      # rows, alignment, wrapping, grids
 cargo run -p rustroke --example containers  # menus, panels, windows, scroll areas, tooltips
 cargo run -p rustroke --example table       # 100 000-row table and a large tree
 cargo run -p rustroke --example rich_text --features markdown   # rich text, Markdown, right-to-left
+cargo run -p rustroke --example graphics    # gradients, shadows, curves, transforms, animation
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
 cargo run -p rustroke --example themes      # live theme editor
 cargo run -p rustroke --example extras      # images, disabled widgets, accessibility

@@ -1344,6 +1344,120 @@ impl Widget for Image {
     }
 }
 
+/// The frames of an animated image (GIF, APNG, animated WebP), uploaded
+/// to the GPU: create it once with [`AnimatedTexture::new`] and show it
+/// with [`AnimatedImage`]. It loops forever.
+#[derive(Clone, Debug)]
+pub struct AnimatedTexture {
+    /// Each frame and how many seconds it stays.
+    frames: Vec<(crate::TextureHandle, f64)>,
+    total: f64,
+}
+
+impl AnimatedTexture {
+    /// Uploads `frames` (images and how long each is shown), e.g. from
+    /// `rustroke::load_animated_image`.
+    pub fn new(
+        ctx: &mut crate::Context,
+        frames: Vec<(rustroke_core::ColorImage, std::time::Duration)>,
+    ) -> Self {
+        let frames: Vec<_> = frames
+            .into_iter()
+            .map(|(image, delay)| {
+                // Browsers show 0 ms frames for 100 ms; so do we.
+                let secs = if delay.is_zero() {
+                    0.1
+                } else {
+                    delay.as_secs_f64()
+                };
+                (ctx.load_texture(image), secs.max(0.02))
+            })
+            .collect();
+        let total = frames.iter().map(|f| f.1).sum();
+        Self { frames, total }
+    }
+
+    /// Number of frames.
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Whether there are no frames.
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
+    /// The frame to show at `time` seconds, and the seconds until the next
+    /// one.
+    pub fn frame_at(&self, time: f64) -> Option<(&crate::TextureHandle, f64)> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let mut t = if self.total > 0.0 {
+            time.rem_euclid(self.total)
+        } else {
+            0.0
+        };
+        for (texture, secs) in &self.frames {
+            if t < *secs {
+                return Some((texture, secs - t));
+            }
+            t -= secs;
+        }
+        self.frames.last().map(|(texture, secs)| (texture, *secs))
+    }
+}
+
+/// Shows an [`AnimatedTexture`], playing it with the app's clock: a new
+/// frame is drawn exactly when the next image is due, so a still UI
+/// with an animation only redraws at the animation's frame rate.
+#[derive(Clone, Debug)]
+pub struct AnimatedImage<'a> {
+    animation: &'a AnimatedTexture,
+    max_width: Option<f32>,
+    alt_text: String,
+}
+
+impl<'a> AnimatedImage<'a> {
+    /// Shows `animation` at one point per pixel.
+    pub fn new(animation: &'a AnimatedTexture) -> Self {
+        Self {
+            animation,
+            max_width: None,
+            alt_text: String::new(),
+        }
+    }
+
+    /// Scales it down (keeping its proportions) to at most `width`.
+    pub fn max_width(mut self, width: f32) -> Self {
+        self.max_width = Some(width);
+        self
+    }
+
+    /// What it shows, for screen readers.
+    pub fn alt_text(mut self, text: impl Into<String>) -> Self {
+        self.alt_text = text.into();
+        self
+    }
+}
+
+impl Widget for AnimatedImage<'_> {
+    fn ui(self, ui: &mut Ui<'_>) -> Response {
+        let time = ui.input().time;
+        let Some((texture, next)) = self.animation.frame_at(time) else {
+            return ui.allocate_response(Vec2::ZERO, Sense::HOVER);
+        };
+        if self.animation.len() > 1 {
+            ui.ctx().request_repaint_after(next);
+        }
+        let mut image = Image::new(texture).alt_text(self.alt_text);
+        if let Some(w) = self.max_width {
+            image = image.max_width(w);
+        }
+        ui.add(image)
+    }
+}
+
 /// A thin line: horizontal across a top-down Ui, vertical inside a row.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Separator;

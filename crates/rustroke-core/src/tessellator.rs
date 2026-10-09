@@ -7,8 +7,8 @@
 use std::f32::consts::TAU;
 
 use crate::{
-    ClippedShape, Color, DisplayList, Galley, PaintCallback, Point, Rect, Shape, Stroke,
-    TextureAtlas, TextureId, Vec2,
+    ClippedShape, Color, DisplayList, Galley, Gradient, GradientKind, PaintCallback, Point, Rect,
+    Shadow, Shape, Stroke, TextureAtlas, TextureId, Vec2,
 };
 
 /// One vertex of a [`Mesh`].
@@ -129,6 +129,7 @@ impl Tessellator {
             }
             let texture = match shape {
                 Shape::Image { texture, .. } => *texture,
+                Shape::Mesh(m) => m.texture,
                 _ => TextureId::Atlas,
             };
             let mesh = match out.last_mut() {
@@ -196,6 +197,22 @@ impl Tessellator {
                 self.fill_and_stroke(*closed, *fill, *stroke, mesh);
             }
             Shape::Text { pos, galley, color } => self.add_text(*pos, galley, *color, mesh),
+            Shape::TransformedText {
+                galley,
+                transform,
+                color,
+            } => self.add_galley(galley, *color, mesh, |p| transform.apply(p)),
+            Shape::Gradient { shape, gradient } => self.add_gradient(shape, gradient, mesh),
+            Shape::Shadow {
+                rect,
+                corner_radius,
+                shadow,
+            } => self.add_shadow(*rect, *corner_radius, shadow, mesh),
+            Shape::Mesh(m) => {
+                let base = mesh.next_index();
+                mesh.vertices.extend_from_slice(&m.vertices);
+                mesh.indices.extend(m.indices.iter().map(|i| i + base));
+            }
             // Drawn by the renderer (see `tessellate`), not as triangles.
             Shape::Callback(_) => {}
             Shape::Image {
@@ -245,29 +262,42 @@ impl Tessellator {
     /// One textured quad per glyph. The origin is snapped to the physical
     /// pixel grid so glyph bitmaps map 1:1 onto screen pixels.
     fn add_text(&self, pos: Point, galley: &Galley, color: Color, mesh: &mut Mesh) {
+        let ppp = self.pixels_per_point;
+        let origin = Point::new((pos.x * ppp).round() / ppp, (pos.y * ppp).round() / ppp);
+        self.add_galley(galley, color, mesh, |p| origin + p.to_vec2());
+    }
+
+    /// The glyphs and decorations of `galley`, with every corner placed by
+    /// `place` (from galley coordinates to the screen).
+    fn add_galley(
+        &self,
+        galley: &Galley,
+        color: Color,
+        mesh: &mut Mesh,
+        place: impl Fn(Point) -> Point,
+    ) {
         if color.a <= 0.0 {
             return;
         }
-        let ppp = self.pixels_per_point;
-        let origin = Point::new((pos.x * ppp).round() / ppp, (pos.y * ppp).round() / ppp);
         // Glyph offsets are in the galley's pixels, which normally match ours.
         let galley_ppp = galley.pixels_per_point;
         let tint = premultiplied(color);
         let emoji_tint = premultiplied(Color::WHITE.with_alpha(color.a));
         // Rich text: own colors, still faded with the galley's alpha.
         let own = |c: Option<Color>| c.map_or(tint, |c| premultiplied(c.with_alpha(c.a * color.a)));
-        let decoration = |mesh: &mut Mesh, d: &crate::GalleyDecoration| {
-            let r =
-                Rect::from_min_max(origin + d.rect.min.to_vec2(), origin + d.rect.max.to_vec2());
-            let c = own(d.color);
-            let first = mesh.next_index();
-            for pos in [
+        let corners = |r: Rect| {
+            [
                 r.min,
                 Point::new(r.max.x, r.min.y),
                 r.max,
                 Point::new(r.min.x, r.max.y),
-            ] {
-                self.push_vertex(mesh, pos, c);
+            ]
+        };
+        let decoration = |mesh: &mut Mesh, d: &crate::GalleyDecoration| {
+            let c = own(d.color);
+            let first = mesh.next_index();
+            for p in corners(d.rect) {
+                self.push_vertex(mesh, place(p), c);
             }
             mesh.quad(first, first + 1, first + 2, first + 3);
         };
@@ -276,8 +306,10 @@ impl Tessellator {
         }
         for glyph in &galley.glyphs {
             let r = glyph.region;
-            let min = origin
-                + Vec2::new(glyph.offset_px[0] as f32, glyph.offset_px[1] as f32) / galley_ppp;
+            let min = Point::new(
+                glyph.offset_px[0] as f32 / galley_ppp,
+                glyph.offset_px[1] as f32 / galley_ppp,
+            );
             let max = min + Vec2::new(r.width as f32, r.height as f32) / galley_ppp;
             let uv_min = [r.x as f32 / self.atlas_size, r.y as f32 / self.atlas_size];
             let uv_max = [
@@ -290,18 +322,127 @@ impl Tessellator {
                 own(glyph.color)
             };
             let first = mesh.next_index();
-            for (pos, uv) in [
-                (min, uv_min),
-                (Point::new(max.x, min.y), [uv_max[0], uv_min[1]]),
-                (max, uv_max),
-                (Point::new(min.x, max.y), [uv_min[0], uv_max[1]]),
-            ] {
-                mesh.vertices.push(Vertex { pos, uv, color });
+            let uvs = [
+                uv_min,
+                [uv_max[0], uv_min[1]],
+                uv_max,
+                [uv_min[0], uv_max[1]],
+            ];
+            for (pos, uv) in corners(Rect::from_min_max(min, max)).into_iter().zip(uvs) {
+                mesh.vertices.push(Vertex {
+                    pos: place(pos),
+                    uv,
+                    color,
+                });
             }
             mesh.quad(first, first + 1, first + 2, first + 3);
         }
         for d in galley.decorations.iter().filter(|d| !d.behind) {
             decoration(mesh, d);
+        }
+    }
+
+    /// The fill of `shape` colored by `gradient`, then its stroke.
+    fn add_gradient(&mut self, shape: &Shape, gradient: &Gradient, mesh: &mut Mesh) {
+        let mut mask = shape.clone();
+        let mut outline = shape.clone();
+        match (&mut mask, &mut outline) {
+            (
+                Shape::Rect { fill, stroke, .. }
+                | Shape::Circle { fill, stroke, .. }
+                | Shape::Path { fill, stroke, .. },
+                Shape::Rect { fill: f2, .. }
+                | Shape::Circle { fill: f2, .. }
+                | Shape::Path { fill: f2, .. },
+            ) => {
+                // The fill as coverage: white, with the fill's alpha.
+                *fill = Color::WHITE.with_alpha(fill.a);
+                *stroke = Stroke::NONE;
+                *f2 = Color::TRANSPARENT;
+            }
+            _ => {
+                // Not a fillable shape: draw it as it is.
+                self.tessellate_shape(shape, mesh);
+                return;
+            }
+        }
+        let mut cover = Mesh::default();
+        self.tessellate_shape(&mask, &mut cover);
+        let mut tris: Vec<[(Point, f32); 3]> = cover
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| {
+                t.map(|i| {
+                    let v = cover.vertices[i as usize];
+                    (v.pos, v.color[3])
+                })
+            })
+            .collect();
+        match gradient.kind {
+            // Colors change linearly between stops, so cutting the
+            // triangles at every stop makes the gradient exact.
+            GradientKind::Linear { .. } => {
+                for &(t, _) in &gradient.stops {
+                    split_triangles(&mut tris, |p| gradient.position(p), t);
+                }
+            }
+            // Distance isn't linear: small triangles follow it closely.
+            GradientKind::Radial { radius, .. } => {
+                let max_edge = (radius * 0.06).clamp(4.0 * self.feather, 24.0 * self.feather);
+                subdivide_triangles(&mut tris, max_edge, 200_000);
+            }
+        }
+        let first = mesh.next_index();
+        for (i, (pos, coverage)) in tris.iter().flatten().enumerate() {
+            let c = premultiplied(gradient.color_at(gradient.position(*pos)));
+            self.push_vertex(mesh, *pos, c.map(|x| x * coverage));
+            if i % 3 == 2 {
+                let base = first + i as u32 - 2;
+                mesh.triangle(base, base + 1, base + 2);
+            }
+        }
+        self.tessellate_shape(&outline, mesh);
+    }
+
+    /// A blurred rounded rectangle: rings fading like a Gaussian blur.
+    fn add_shadow(&mut self, rect: Rect, corner_radius: f32, shadow: &Shadow, mesh: &mut Mesh) {
+        if shadow.color.a <= 0.0 {
+            return;
+        }
+        let rect = Rect::from_min_max(rect.min + shadow.offset, rect.max + shadow.offset)
+            .expand(shadow.spread);
+        if rect.is_empty() {
+            return;
+        }
+        let blur = shadow.blur.max(self.feather);
+        self.path.clear();
+        self.add_rounded_rect(rect, (corner_radius + shadow.spread).max(0.0));
+        dedup_points(&mut self.path, self.feather * 0.01);
+        if self.path.len() < 3 {
+            return;
+        }
+        compute_normals(&self.path, true, &mut self.normals);
+        // Inward rings must not cross the middle of the rectangle.
+        let inner = blur.min(rect.width().min(rect.height()) * 0.45);
+        let sigma = blur / 2.0;
+        let steps = 8;
+        let rings: Vec<Ring> = (0..=steps)
+            .map(|k| {
+                let offset = -inner + (inner + blur) * k as f32 / steps as f32;
+                // Coverage of a blurred edge at `offset` from it.
+                let coverage = 0.5 * erfc_approx(offset / (sigma * std::f32::consts::SQRT_2));
+                Ring {
+                    offset,
+                    color: premultiplied(shadow.color).map(|c| c * coverage),
+                }
+            })
+            .collect();
+        let first = self.add_rings(&rings, true, mesh);
+        let ring_count = rings.len() as u32;
+        for i in 1..self.path.len() as u32 - 1 {
+            mesh.triangle(first, first + i * ring_count, first + (i + 1) * ring_count);
         }
     }
 
@@ -587,6 +728,77 @@ fn signed_area(path: &[Point]) -> f32 {
         })
         .sum::<f32>()
         / 2.0
+}
+
+/// A triangle corner: position and coverage.
+type CoverVertex = (Point, f32);
+
+/// Cuts every triangle crossing the line where `f` (linear in position)
+/// equals `cut` into pieces on either side.
+fn split_triangles(tris: &mut Vec<[CoverVertex; 3]>, f: impl Fn(Point) -> f32, cut: f32) {
+    let mut out = Vec::with_capacity(tris.len());
+    for tri in tris.drain(..) {
+        let below = tri.map(|v| f(v.0) < cut);
+        let count = below.iter().filter(|b| **b).count();
+        if count == 0 || count == 3 {
+            out.push(tri);
+            continue;
+        }
+        // The corner alone on its side.
+        let lone = (0..3)
+            .find(|&i| below[i] != below[(i + 1) % 3] && below[i] != below[(i + 2) % 3])
+            .unwrap_or(0);
+        let (a, b, c) = (tri[lone], tri[(lone + 1) % 3], tri[(lone + 2) % 3]);
+        let at = |p: CoverVertex, q: CoverVertex| {
+            let (fp, fq) = (f(p.0), f(q.0));
+            let s = if fq != fp {
+                ((cut - fp) / (fq - fp)).clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
+            (p.0 + (q.0 - p.0) * s, p.1 + (q.1 - p.1) * s)
+        };
+        let (ab, ac) = (at(a, b), at(a, c));
+        out.push([a, ab, ac]);
+        out.push([ab, b, c]);
+        out.push([ab, c, ac]);
+    }
+    *tris = out;
+}
+
+/// Splits triangles in two at the middle of their longest edge until no
+/// edge is longer than `max_edge` (or there are `limit` triangles).
+fn subdivide_triangles(tris: &mut Vec<[CoverVertex; 3]>, max_edge: f32, limit: usize) {
+    let mut todo = std::mem::take(tris);
+    while let Some(tri) = todo.pop() {
+        let len = |i: usize| (tri[(i + 1) % 3].0 - tri[i].0).length_sq();
+        let longest = (0..3)
+            .max_by(|&i, &j| len(i).total_cmp(&len(j)))
+            .unwrap_or(0);
+        if len(longest) <= max_edge * max_edge || tris.len() + todo.len() >= limit {
+            tris.push(tri);
+            continue;
+        }
+        let (a, b, c) = (tri[longest], tri[(longest + 1) % 3], tri[(longest + 2) % 3]);
+        let m = (
+            Point::new((a.0.x + b.0.x) / 2.0, (a.0.y + b.0.y) / 2.0),
+            (a.1 + b.1) / 2.0,
+        );
+        todo.push([a, m, c]);
+        todo.push([m, b, c]);
+    }
+}
+
+/// The complementary error function (Abramowitz and Stegun 7.1.26,
+/// error below 1.5e-7), for blur profiles.
+fn erfc_approx(x: f32) -> f32 {
+    let z = x.abs();
+    let t = 1.0 / (1.0 + 0.327_591_1 * z);
+    let poly = t
+        * (0.254_829_6
+            + t * (-0.284_496_74 + t * (1.421_413_7 + t * (-1.453_152_1 + t * 1.061_405_4))));
+    let erfc = poly * (-z * z).exp();
+    if x >= 0.0 { erfc } else { 2.0 - erfc }
 }
 
 #[cfg(test)]
@@ -900,5 +1112,154 @@ mod tests {
         let image = &meshes[1].mesh;
         assert_eq!(image.vertices.len(), 4);
         assert_eq!(image.vertices[2].uv, [1.0, 1.0]);
+    }
+
+    #[test]
+    fn linear_gradients_cover_the_shape_with_exact_colors() {
+        use crate::Gradient;
+        let rect = Rect::from_min_max(point(0.0, 0.0), point(100.0, 20.0));
+        let red = Color::new(1.0, 0.0, 0.0, 1.0);
+        let blue = Color::new(0.0, 0.0, 1.0, 1.0);
+        let gradient = Gradient::linear(point(0.0, 0.0), point(100.0, 0.0), red, blue)
+            .with_stop(0.5, Color::WHITE);
+        let shape = Shape::Gradient {
+            shape: Box::new(Shape::Rect {
+                rect,
+                corner_radius: 0.0,
+                fill: Color::WHITE,
+                stroke: Stroke::NONE,
+            }),
+            gradient,
+        };
+        let mesh = tessellate(shape, 1.0);
+        assert!(
+            (coverage(&mesh) - 2000.0).abs() < 25.0,
+            "{}",
+            coverage(&mesh)
+        );
+        // Inside the shape, every vertex has the gradient's color for
+        // its position; the stop at the middle is a vertex column.
+        let at = |x: f32| {
+            mesh.vertices
+                .iter()
+                .find(|v| (v.pos.x - x).abs() < 1e-3 && v.pos.y > 5.0 && v.pos.y < 15.0)
+                .map(|v| v.color)
+        };
+        assert_eq!(at(50.0), Some([1.0, 1.0, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn radial_gradients_are_subdivided_finely() {
+        use crate::Gradient;
+        let g = Gradient::radial(point(50.0, 50.0), 50.0, Color::WHITE, Color::BLACK);
+        let shape = Shape::Gradient {
+            shape: Box::new(Shape::Circle {
+                center: point(50.0, 50.0),
+                radius: 50.0,
+                fill: Color::WHITE,
+                stroke: Stroke::NONE,
+            }),
+            gradient: g,
+        };
+        let mesh = tessellate(shape, 1.0);
+        let area = std::f32::consts::PI * 2500.0;
+        assert!((coverage(&mesh) - area).abs() < area * 0.01);
+        // Near the center the color is close to white.
+        let center = mesh
+            .vertices
+            .iter()
+            .min_by(|a, b| {
+                (a.pos - point(50.0, 50.0))
+                    .length()
+                    .total_cmp(&(b.pos - point(50.0, 50.0)).length())
+            })
+            .unwrap();
+        assert!(center.color[0] > 0.85, "{:?}", center.color);
+    }
+
+    #[test]
+    fn shadows_cover_about_their_rectangle() {
+        use crate::Shadow;
+        let shape = Shape::Shadow {
+            rect: Rect::from_min_max(point(0.0, 0.0), point(100.0, 100.0)),
+            corner_radius: 0.0,
+            shadow: Shadow {
+                offset: vec2(0.0, 0.0),
+                blur: 10.0,
+                spread: 0.0,
+                color: Color::BLACK,
+            },
+        };
+        let mesh = tessellate(shape, 1.0);
+        // A blur moves coverage outward as much as inward.
+        let c = coverage(&mesh);
+        assert!((c - 10_000.0).abs() < 300.0, "{c}");
+        let outer = mesh
+            .vertices
+            .iter()
+            .map(|v| v.pos.x)
+            .fold(f32::MIN, f32::max);
+        assert!(outer >= 109.0, "fades beyond the edge: {outer}");
+    }
+
+    #[test]
+    fn transforms_rotate_shapes_and_text() {
+        use crate::Transform;
+        let mut list = DisplayList::new();
+        let t = Transform::rotate_around(point(0.0, 0.0), std::f32::consts::FRAC_PI_2);
+        list.with_transform(t, |list| {
+            list.rect_filled(
+                Rect::from_min_max(point(0.0, 0.0), point(10.0, 2.0)),
+                0.0,
+                Color::WHITE,
+            );
+        });
+        let Shape::Path { points, .. } = &list.shapes()[0].shape else {
+            panic!("rectangles become polygons")
+        };
+        // (10, 0) rotated by 90° clockwise on screen goes to (0, 10).
+        assert!(
+            points
+                .iter()
+                .any(|p| (p.x).abs() < 1e-4 && (p.y - 10.0).abs() < 1e-4)
+        );
+        let meshes = tessellator(1.0).tessellate(&list);
+        assert!((coverage(&meshes[0].mesh) - 20.0).abs() < 1.5);
+    }
+
+    #[test]
+    fn transformed_text_places_glyph_corners_through_the_transform() {
+        use crate::{AtlasRegion, GlyphQuad, Transform};
+        let galley = Galley {
+            pixels_per_point: 1.0,
+            glyphs: vec![GlyphQuad {
+                offset_px: [0, 0],
+                region: AtlasRegion {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 2,
+                },
+                colored: false,
+                color: None,
+            }],
+            ..Default::default()
+        };
+        let shape = Shape::TransformedText {
+            galley: std::sync::Arc::new(galley),
+            transform: Transform::from_axes(point(10.0, 10.0), vec2(0.0, 1.0), vec2(-1.0, 0.0)),
+            color: Color::WHITE,
+        };
+        let mesh = tessellate(shape, 1.0);
+        let corners: Vec<Point> = mesh.vertices.iter().map(|v| v.pos).collect();
+        assert_eq!(
+            corners,
+            [
+                point(10.0, 10.0),
+                point(10.0, 14.0),
+                point(8.0, 14.0),
+                point(8.0, 10.0)
+            ]
+        );
     }
 }

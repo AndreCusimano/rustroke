@@ -28,14 +28,7 @@ impl UiRoot for (&mut Context, &mut Fonts) {
 /// a soft shadow, the fill and a border.
 pub(crate) fn paint_floating_frame(painter: &mut DisplayList, rect: Rect, visuals: &Visuals) {
     let radius = visuals.window_corner_radius;
-    for (spread, alpha) in [(6.0, 0.25), (3.0, 0.5), (1.0, 1.0)] {
-        let shadow = visuals.shadow.with_alpha(visuals.shadow.a * alpha * 0.4);
-        let r = Rect::from_min_max(
-            rect.min + vec2(-spread, -spread + 3.0),
-            rect.max + vec2(spread, spread + 3.0),
-        );
-        painter.rect_filled(r, radius + spread, shadow);
-    }
+    painter.shadow(rect, radius, visuals.shadow);
     painter.rect(rect, radius, visuals.window_fill, visuals.window_stroke);
 }
 

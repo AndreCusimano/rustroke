@@ -1,6 +1,13 @@
 use std::sync::Arc;
 
-use crate::{Color, Galley, Point, Rect, Shape, Stroke};
+use crate::{
+    Color, Galley, Gradient, Mesh, Point, Rect, Shadow, Shape, Stroke, Transform, Vertex,
+    cubic_bezier_points, dashes, quadratic_bezier_points,
+};
+
+/// How far curves drawn with [`DisplayList::cubic_bezier`] and friends may
+/// stray from the true curve, in points.
+const CURVE_TOLERANCE: f32 = 0.05;
 
 /// A shape together with the clip rectangle it is drawn within.
 #[derive(Clone, Debug, PartialEq)]
@@ -198,6 +205,334 @@ impl DisplayList {
             fill,
             stroke,
         });
+    }
+
+    /// A rectangle filled with a gradient, with an outline.
+    pub fn rect_gradient(
+        &mut self,
+        rect: Rect,
+        corner_radius: f32,
+        gradient: Gradient,
+        stroke: Stroke,
+    ) {
+        self.gradient_fill(
+            Shape::Rect {
+                rect,
+                corner_radius,
+                fill: Color::WHITE,
+                stroke,
+            },
+            gradient,
+        );
+    }
+
+    /// A circle filled with a gradient, with an outline.
+    pub fn circle_gradient(
+        &mut self,
+        center: Point,
+        radius: f32,
+        gradient: Gradient,
+        stroke: Stroke,
+    ) {
+        self.gradient_fill(
+            Shape::Circle {
+                center,
+                radius,
+                fill: Color::WHITE,
+                stroke,
+            },
+            gradient,
+        );
+    }
+
+    /// A convex polygon filled with a gradient, with an outline.
+    pub fn polygon_gradient(&mut self, points: Vec<Point>, gradient: Gradient, stroke: Stroke) {
+        self.gradient_fill(
+            Shape::Path {
+                points,
+                closed: true,
+                fill: Color::WHITE,
+                stroke,
+            },
+            gradient,
+        );
+    }
+
+    /// `shape` (rectangle, circle or convex path) with its fill replaced by
+    /// `gradient` (the fill's alpha still applies).
+    pub fn gradient_fill(&mut self, shape: Shape, gradient: Gradient) {
+        self.add(Shape::Gradient {
+            shape: Box::new(shape),
+            gradient,
+        });
+    }
+
+    /// A soft shadow under the rounded rectangle `rect` (draw it before
+    /// the rectangle).
+    pub fn shadow(&mut self, rect: Rect, corner_radius: f32, shadow: Shadow) {
+        self.add(Shape::Shadow {
+            rect,
+            corner_radius,
+            shadow,
+        });
+    }
+
+    /// A dashed polyline: dashes `dash` points long with `gap` points
+    /// between them.
+    pub fn dashed_line(&mut self, points: &[Point], stroke: Stroke, dash: f32, gap: f32) {
+        for d in dashes(points, dash, gap) {
+            self.polyline(d, stroke);
+        }
+    }
+
+    /// A dotted polyline: round dots of `radius` every `spacing` points.
+    pub fn dotted_line(&mut self, points: &[Point], radius: f32, spacing: f32, color: Color) {
+        let spacing = spacing.max(radius * 2.0).max(0.1);
+        let mut left = 0.0;
+        for w in points.windows(2) {
+            let len = (w[1] - w[0]).length();
+            let mut t = left;
+            while t <= len {
+                let p = w[0] + (w[1] - w[0]) * (t / len.max(f32::EPSILON));
+                self.circle_filled(p, radius, color);
+                t += spacing;
+            }
+            left = t - len;
+        }
+    }
+
+    /// The quadratic Bézier curve from `p[0]` to `p[2]`, bent towards `p[1]`.
+    pub fn quadratic_bezier(&mut self, p: [Point; 3], stroke: Stroke) {
+        self.polyline(quadratic_bezier_points(p, CURVE_TOLERANCE), stroke);
+    }
+
+    /// The cubic Bézier curve from `p[0]` to `p[3]` with control points
+    /// `p[1]` and `p[2]`.
+    pub fn cubic_bezier(&mut self, p: [Point; 4], stroke: Stroke) {
+        self.polyline(cubic_bezier_points(p, CURVE_TOLERANCE), stroke);
+    }
+
+    /// Triangles built by the app (see [`Mesh`]).
+    pub fn mesh(&mut self, mesh: Arc<Mesh>) {
+        self.add(Shape::Mesh(mesh));
+    }
+
+    /// Laid out text drawn through `transform`: rotated, scaled or sheared
+    /// (e.g. on the faces of a view cube, with
+    /// [`Transform::from_axes`]). Galley coordinates start at its
+    /// top-left corner.
+    pub fn galley_transformed(&mut self, galley: Arc<Galley>, transform: Transform, color: Color) {
+        self.add(Shape::TransformedText {
+            galley,
+            transform,
+            color,
+        });
+    }
+
+    /// Runs `add_shapes`, then moves, rotates, scales or shears what it
+    /// added with `transform`. Rectangles and circles become polygons,
+    /// images and text are drawn through the transform; clip rectangles
+    /// stay as they were, and paint callbacks are not transformed.
+    pub fn with_transform<R>(
+        &mut self,
+        transform: Transform,
+        add_shapes: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let start = self.shapes.len();
+        let result = add_shapes(self);
+        for clipped in &mut self.shapes[start..] {
+            let shape = std::mem::replace(
+                &mut clipped.shape,
+                Shape::Path {
+                    points: Vec::new(),
+                    closed: false,
+                    fill: Color::TRANSPARENT,
+                    stroke: Stroke::NONE,
+                },
+            );
+            clipped.shape = transform_shape(shape, &transform);
+        }
+        result
+    }
+}
+
+/// Points around a rounded rectangle, clockwise from the top-left corner.
+fn rounded_rect_points(rect: Rect, radius: f32) -> Vec<Point> {
+    let r = radius
+        .min(rect.width() / 2.0)
+        .min(rect.height() / 2.0)
+        .max(0.0);
+    if r <= 0.0 {
+        return vec![
+            rect.min,
+            Point::new(rect.max.x, rect.min.y),
+            rect.max,
+            Point::new(rect.min.x, rect.max.y),
+        ];
+    }
+    let mut points = Vec::new();
+    let corners = [
+        (
+            Point::new(rect.min.x + r, rect.min.y + r),
+            std::f32::consts::PI,
+        ),
+        (
+            Point::new(rect.max.x - r, rect.min.y + r),
+            std::f32::consts::PI * 1.5,
+        ),
+        (Point::new(rect.max.x - r, rect.max.y - r), 0.0),
+        (
+            Point::new(rect.min.x + r, rect.max.y - r),
+            std::f32::consts::FRAC_PI_2,
+        ),
+    ];
+    let steps = arc_steps(r) / 4;
+    for (c, start) in corners {
+        for k in 0..=steps {
+            let a = start + std::f32::consts::FRAC_PI_2 * k as f32 / steps as f32;
+            points.push(Point::new(c.x + r * a.cos(), c.y + r * a.sin()));
+        }
+    }
+    points
+}
+
+/// Segments for a full circle of `radius` points, fine enough up to 2×
+/// zoom.
+fn arc_steps(radius: f32) -> usize {
+    ((radius * 2.0).sqrt() * 8.0).ceil().clamp(16.0, 512.0) as usize / 4 * 4
+}
+
+/// `shape` moved by `t` (see [`DisplayList::with_transform`]).
+fn transform_shape(shape: Shape, t: &Transform) -> Shape {
+    let scale_stroke = |s: Stroke| Stroke::new(s.width * t.scale_factor(), s.color);
+    let map = |points: Vec<Point>| points.into_iter().map(|p| t.apply(p)).collect::<Vec<_>>();
+    match shape {
+        Shape::Rect {
+            rect,
+            corner_radius,
+            fill,
+            stroke,
+        } => Shape::Path {
+            points: map(rounded_rect_points(rect, corner_radius)),
+            closed: true,
+            fill,
+            stroke: scale_stroke(stroke),
+        },
+        Shape::Circle {
+            center,
+            radius,
+            fill,
+            stroke,
+        } => {
+            let n = arc_steps(radius);
+            let points = (0..n)
+                .map(|k| {
+                    let a = std::f32::consts::TAU * k as f32 / n as f32;
+                    Point::new(center.x + radius * a.cos(), center.y + radius * a.sin())
+                })
+                .collect();
+            Shape::Path {
+                points: map(points),
+                closed: true,
+                fill,
+                stroke: scale_stroke(stroke),
+            }
+        }
+        Shape::LineSegment { points, stroke } => Shape::LineSegment {
+            points: points.map(|p| t.apply(p)),
+            stroke: scale_stroke(stroke),
+        },
+        Shape::Path {
+            points,
+            closed,
+            fill,
+            stroke,
+        } => Shape::Path {
+            points: map(points),
+            closed,
+            fill,
+            stroke: scale_stroke(stroke),
+        },
+        Shape::Text { pos, galley, color } => Shape::TransformedText {
+            galley,
+            transform: Transform::translate(pos.to_vec2()).then(*t),
+            color,
+        },
+        Shape::TransformedText {
+            galley,
+            transform,
+            color,
+        } => Shape::TransformedText {
+            galley,
+            transform: transform.then(*t),
+            color,
+        },
+        Shape::Image {
+            rect,
+            texture,
+            uv,
+            tint,
+            ..
+        } => {
+            let c = tint.with_alpha(tint.a);
+            let color = [c.r * c.a, c.g * c.a, c.b * c.a, c.a];
+            let corners = [
+                (rect.min, [uv.min.x, uv.min.y]),
+                (Point::new(rect.max.x, rect.min.y), [uv.max.x, uv.min.y]),
+                (rect.max, [uv.max.x, uv.max.y]),
+                (Point::new(rect.min.x, rect.max.y), [uv.min.x, uv.max.y]),
+            ];
+            Shape::Mesh(Arc::new(Mesh {
+                texture,
+                vertices: corners
+                    .into_iter()
+                    .map(|(p, uv)| Vertex {
+                        pos: t.apply(p),
+                        uv,
+                        color,
+                    })
+                    .collect(),
+                indices: vec![0, 1, 2, 0, 2, 3],
+            }))
+        }
+        Shape::Mesh(mut mesh) => {
+            for v in &mut Arc::make_mut(&mut mesh).vertices {
+                v.pos = t.apply(v.pos);
+            }
+            Shape::Mesh(mesh)
+        }
+        Shape::Gradient { shape, gradient } => Shape::Gradient {
+            shape: Box::new(transform_shape(*shape, t)),
+            gradient: gradient.transformed(t),
+        },
+        Shape::Shadow {
+            rect,
+            corner_radius,
+            shadow,
+        } => {
+            // Shadows stay axis-aligned: the bounds of the moved rectangle.
+            let corners = [
+                rect.min,
+                Point::new(rect.max.x, rect.min.y),
+                rect.max,
+                Point::new(rect.min.x, rect.max.y),
+            ];
+            let bounds = corners
+                .into_iter()
+                .map(|p| t.apply(p))
+                .fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(p, p)));
+            Shape::Shadow {
+                rect: bounds,
+                corner_radius: corner_radius * t.scale_factor(),
+                shadow: Shadow {
+                    blur: shadow.blur * t.scale_factor(),
+                    spread: shadow.spread * t.scale_factor(),
+                    offset: t.apply_vec(shadow.offset),
+                    ..shadow
+                },
+            }
+        }
+        callback @ Shape::Callback(_) => callback,
     }
 }
 

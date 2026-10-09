@@ -117,7 +117,12 @@
 //!   works in light and dark themes. Show them with [`Ui::icon`],
 //!   [`Button::icon`], [`Button::icon_only`] or [`CollapsingHeader::icon`].
 //! - **Custom drawing**: [`Ui::painter`] or [`Frame::shapes`] accept
-//!   rectangles, circles, lines, polygons, text and images, anti-aliased.
+//!   rectangles, circles, lines, polygons, text and images, anti-aliased,
+//!   plus [`Gradient`] fills, soft [`Shadow`]s, dashed and dotted lines,
+//!   Bézier curves, app-built [`Mesh`]es and [`Transform`]s
+//!   (`DisplayList::with_transform`, `DisplayList::galley_transformed`).
+//! - **Animated images**: [`load_animated_image`] (GIF, APNG, WebP) →
+//!   [`AnimatedTexture`] → [`AnimatedImage`].
 //! - **Accessibility**: widgets are exposed to screen readers (VoiceOver,
 //!   Narrator, Orca) through AccessKit. Custom widgets can describe
 //!   themselves with [`Ui::describe`].
@@ -145,7 +150,7 @@
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
-//! `table`, `rich_text` with `--features markdown`,
+//! `table`, `rich_text` with `--features markdown`, `graphics`,
 //! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
@@ -158,9 +163,10 @@
 //! API) and `rustroke-winit` (window and event loop).
 
 pub use rustroke_core::{
-    Color, ColorImage, DisplayList, Event, Galley, ImeEvent, InputState, Key, KeyboardShortcut,
-    Modifiers, POINTS_PER_SCROLL_LINE, PaintCallback, PhysicalSize, Point, PointerButton, RawInput,
-    Rect, Shape, Stroke, TextureId, TexturesDelta, Vec2, point, vec2,
+    Color, ColorImage, DisplayList, Event, Galley, Gradient, GradientKind, ImeEvent, InputState,
+    Key, KeyboardShortcut, Mesh, Modifiers, POINTS_PER_SCROLL_LINE, PaintCallback, PhysicalSize,
+    Point, PointerButton, RawInput, Rect, Shadow, Shape, Stroke, TextureId, TexturesDelta,
+    Transform, Vec2, Vertex, point, vec2,
 };
 pub use rustroke_text::{
     FontFamily, Fonts, ICON_ACCENT_SOURCE_COLOR, IconError, IconId, IconLayer, LayoutJob,
@@ -168,15 +174,15 @@ pub use rustroke_text::{
 };
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
-    Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, Column, ComboBox,
-    Context, CursorIcon, Direction, DockArea, DockNode, DockState, DockViewer, DragValue,
-    FocusLost, FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId,
-    Layout, List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide,
-    ProgressBar, PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle,
-    Response, ScrollArea, SearchField, SelectableLabel, Sense, Separator, Slider, SortOrder,
-    Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, Table, TableResponse, TextEdit,
-    TextureHandle, ToolButton, ToolButtonResponse, Tree, TreeResponse, Ui, UiRoot, Visuals, Widget,
-    WidgetDescription, WidgetInfo, WidgetRole, Window,
+    Align, AnimatedImage, AnimatedTexture, Button, CentralPanel, Checkbox, CollapsingHeader,
+    CollapsingResponse, Column, ComboBox, Context, CursorIcon, Direction, DockArea, DockNode,
+    DockState, DockViewer, DragValue, FocusLost, FrameOutput, Grid, Hyperlink, Icon, IconToggle,
+    Id, InnerResponse, Label, LayerId, Layout, List, ListResponse, Modal, ModalResponse, Numeric,
+    Order, Panel, PanelSide, ProgressBar, PropertyGrid, PropertyGridUi, RadioButton,
+    ReferenceField, RepaintHandle, Response, ScrollArea, SearchField, SelectableLabel, Sense,
+    Separator, Slider, SortOrder, Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel,
+    Table, TableResponse, TextEdit, TextureHandle, ToolButton, ToolButtonResponse, Tree,
+    TreeResponse, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
 };
 #[cfg(feature = "markdown")]
 pub use rustroke_widgets::{ImageLoader, Markdown};
@@ -196,6 +202,48 @@ pub fn load_image(bytes: &[u8]) -> Result<ColorImage, image::ImageError> {
     ))
 }
 
+/// Decodes an animated GIF, PNG (APNG) or WebP file into its frames and
+/// how long each is shown, for [`AnimatedTexture::new`]. Still images
+/// (also JPEG) give one frame.
+#[cfg(feature = "image")]
+pub fn load_animated_image(
+    bytes: &[u8],
+) -> Result<Vec<(ColorImage, std::time::Duration)>, image::ImageError> {
+    use image::AnimationDecoder;
+    use std::io::Cursor;
+    let frames = match image::guess_format(bytes)? {
+        image::ImageFormat::Gif => {
+            image::codecs::gif::GifDecoder::new(Cursor::new(bytes))?.into_frames()
+        }
+        image::ImageFormat::Png => {
+            let decoder = image::codecs::png::PngDecoder::new(Cursor::new(bytes))?;
+            if !decoder.is_apng()? {
+                return Ok(vec![(load_image(bytes)?, std::time::Duration::ZERO)]);
+            }
+            decoder.apng()?.into_frames()
+        }
+        image::ImageFormat::WebP => {
+            let decoder = image::codecs::webp::WebPDecoder::new(Cursor::new(bytes))?;
+            if !decoder.has_animation() {
+                return Ok(vec![(load_image(bytes)?, std::time::Duration::ZERO)]);
+            }
+            decoder.into_frames()
+        }
+        _ => return Ok(vec![(load_image(bytes)?, std::time::Duration::ZERO)]),
+    };
+    frames
+        .map(|frame| {
+            let frame = frame?;
+            let delay = std::time::Duration::from(frame.delay());
+            let rgba = frame.into_buffer();
+            Ok((
+                ColorImage::from_rgba_unmultiplied([rgba.width(), rgba.height()], rgba.as_raw()),
+                delay,
+            ))
+        })
+        .collect()
+}
+
 #[cfg(all(test, feature = "image"))]
 mod tests {
     #[test]
@@ -212,6 +260,35 @@ mod tests {
         assert_eq!(image.size, [1, 1]);
         assert_eq!(image.pixels[0], [255, 0, 0, 255]);
         assert!(super::load_image(b"not an image").is_err());
+    }
+
+    #[test]
+    fn decodes_animated_gifs_and_plays_them() {
+        use image::codecs::gif::GifEncoder;
+        use image::{Delay, Frame, Rgba, RgbaImage};
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            for (color, ms) in [([255, 0, 0, 255], 100), ([0, 0, 255, 255], 300)] {
+                let image = RgbaImage::from_pixel(2, 2, Rgba(color));
+                let delay = Delay::from_numer_denom_ms(ms, 1);
+                encoder
+                    .encode_frame(Frame::from_parts(image, 0, 0, delay))
+                    .unwrap();
+            }
+        }
+        let frames = super::load_animated_image(&bytes).unwrap();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].0.pixels[0], [255, 0, 0, 255]);
+        assert_eq!(frames[1].1, std::time::Duration::from_millis(300));
+
+        let mut ctx = super::Context::new();
+        let anim = super::AnimatedTexture::new(&mut ctx, frames);
+        let (first, _) = anim.frame_at(0.05).unwrap();
+        let (second, left) = anim.frame_at(0.2).unwrap();
+        assert_ne!(first.id(), second.id());
+        assert!((left - 0.2).abs() < 1e-9, "{left}");
+        assert_eq!(anim.frame_at(0.45).unwrap().0.id(), first.id(), "it loops");
     }
 }
 
