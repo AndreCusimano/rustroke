@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-09
+
+### Added
+
+- **Color picker**: `ColorPicker::new(&mut color).alpha(true)`, a swatch
+  that opens a saturation/value square, a hue bar, an opacity bar and a
+  hex field (`#RGB`, `#RRGGBB`, `#RRGGBBAA`). `Color::to_hsva` /
+  `from_hsva`.
+- **Date and time pickers**: `DatePicker::new(&mut date)` with a calendar
+  popup (month navigation, weeks from Monday or `sunday_first`);
+  `TimePicker::new(&mut hour, &mut minute)`. `Date` (days since the
+  epoch, weekday, `add_months`, `today_utc`, ISO display) and
+  `days_in_month`, without dependencies.
+- **Toasts**: `ctx.toast(Toast::success("Saved"))` (info, success,
+  warning, error; `duration`) shows messages stacked in the bottom-right
+  corner, fading in and out, each with a × to dismiss it;
+  `show_toasts` for apps driving a `Context` directly.
+- New `pickers` example.
+
 ## [0.14.0] — 2026-10-09
 
 ### Added
@@ -508,7 +527,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/AndreCusimano/rustroke/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/AndreCusimano/rustroke/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/AndreCusimano/rustroke/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/AndreCusimano/rustroke/compare/v0.11.0...v0.12.0

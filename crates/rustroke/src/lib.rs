@@ -66,6 +66,8 @@
 //!   [`ProgressBar`], [`Spinner`], [`List`] (rows to select and reorder
 //!   by dragging), [`Table`] (sortable, resizable columns; millions of
 //!   rows), [`Tree`] (expandable nodes), [`ToolButton`] (toolbar icon with a menu of variants),
+//!   [`ColorPicker`], [`DatePicker`], [`TimePicker`], toasts
+//!   ([`Context::toast`]),
 //!   [`PropertyGrid`] (name / value rows in collapsible sections) and
 //!   [`ReferenceField`], [`Ui::separator`]; any widget can be disabled with
 //!   [`Ui::add_enabled`]. Buttons, fields and combo boxes take their own
@@ -167,7 +169,7 @@
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
 //! `table`, `rich_text` with `--features markdown`, `graphics`,
-//! `platform` with `--features native-menu,tray`,
+//! `platform` with `--features native-menu,tray`, `pickers`,
 //! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
@@ -192,15 +194,15 @@ pub use rustroke_text::{
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
     Align, AnimatedImage, AnimatedTexture, Automation, Button, CentralPanel, Checkbox,
-    CollapsingHeader, CollapsingResponse, Column, ComboBox, Context, CursorIcon, Direction,
-    DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost, FrameOutput, Grid, Hyperlink,
-    Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout, List, ListResponse, Modal,
-    ModalResponse, Numeric, Order, Panel, PanelSide, ProgressBar, PropertyGrid, PropertyGridUi,
-    RadioButton, ReferenceField, RepaintHandle, Response, ScrollArea, SearchField, SelectableLabel,
-    Sense, Separator, Slider, SortOrder, Spinner, SplitAxis, Style, TabBar, TabBarResponse,
-    TabLabel, Table, TableResponse, TextEdit, TextureHandle, ToolButton, ToolButtonResponse, Tree,
-    TreeResponse, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
-    show_inspector,
+    CollapsingHeader, CollapsingResponse, ColorPicker, Column, ComboBox, Context, CursorIcon, Date,
+    DatePicker, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
+    FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout,
+    List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide, ProgressBar,
+    PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle, Response, ScrollArea,
+    SearchField, SelectableLabel, Sense, Separator, Slider, SortOrder, Spinner, SplitAxis, Style,
+    TabBar, TabBarResponse, TabLabel, Table, TableResponse, TextEdit, TextureHandle, TimePicker,
+    Toast, ToastLevel, ToolButton, ToolButtonResponse, Tree, TreeResponse, Ui, UiRoot, Visuals,
+    Widget, WidgetDescription, WidgetInfo, WidgetRole, Window, show_inspector, show_toasts,
 };
 #[cfg(feature = "markdown")]
 pub use rustroke_widgets::{ImageLoader, Markdown};

@@ -89,7 +89,8 @@ fn main() -> Result<(), rustroke::RunError> {
   multi-line text fields (selection, double/triple click, clipboard, undo,
   word navigation, input methods for accented and Asian text, passwords),
   search fields, links, images (also with rounded corners), SVG icons,
-  two-state icon buttons, toolbar buttons with menus of variants, property
+  two-state icon buttons, color, date and time pickers, toasts, toolbar
+  buttons with menus of variants, property
   grids, separators. Any widget can be disabled, and buttons and fields
   can have their own colors, borders, radius and size.
 - **Layout**: rows, columns, alignment, wrapping, fixed-size widgets, grids
@@ -171,6 +172,7 @@ cargo run -p rustroke --example table       # 100 000-row table and a large tree
 cargo run -p rustroke --example rich_text --features markdown   # rich text, Markdown, right-to-left
 cargo run -p rustroke --example graphics    # gradients, shadows, curves, transforms, animation
 cargo run -p rustroke --example platform --features native-menu,tray   # drag and drop, files, menu bar, tray
+cargo run -p rustroke --example pickers     # color, date and time pickers, toasts
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
 cargo run -p rustroke --example themes      # live theme editor
 cargo run -p rustroke --example extras      # images, disabled widgets, accessibility

@@ -236,6 +236,7 @@ impl Integration {
             platform_events: Default::default(),
         };
         add(&mut frame);
+        rustroke_widgets::show_toasts(&mut frame);
         rustroke_widgets::show_inspector(&mut frame);
         let Frame {
             mut shapes,

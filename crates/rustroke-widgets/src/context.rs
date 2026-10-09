@@ -408,6 +408,10 @@ pub struct Context {
     inspector_open: bool,
     /// What is being dragged with [`Ui::dnd_drag_source`], if anything.
     dnd: Option<DndPayload>,
+    /// Toasts on screen (start time NaN until first shown).
+    toasts: Vec<crate::toast::ShownToast>,
+    /// Counter for toast ids.
+    toast_count: u64,
     /// Shared with [`crate::Automation`] handles, once one was created.
     automation: Option<Arc<crate::automation::AutomationShared>>,
     /// State saved by [`Context::save_state`]: JSON by id.
@@ -453,6 +457,8 @@ impl Default for Context {
             zoom_shortcuts: true,
             inspector_open: false,
             dnd: None,
+            toasts: Vec::new(),
+            toast_count: 0,
             automation: None,
             #[cfg(feature = "persistence")]
             persisted: HashMap::new(),
@@ -1192,6 +1198,25 @@ impl Context {
             self.request_repaint();
         }
         current
+    }
+
+    // ---- Toasts ----
+
+    /// Shows a short message in the bottom-right corner for a few seconds
+    /// (e.g. "Saved", or an error). See [`crate::Toast`].
+    pub fn toast(&mut self, toast: crate::Toast) {
+        self.toast_count += 1;
+        let id = Id::new("toast").with(self.toast_count);
+        self.toasts.push((id, toast, f64::NAN));
+        self.request_repaint();
+    }
+
+    pub(crate) fn take_toasts(&mut self) -> Vec<crate::toast::ShownToast> {
+        std::mem::take(&mut self.toasts)
+    }
+
+    pub(crate) fn put_toasts(&mut self, toasts: Vec<crate::toast::ShownToast>) {
+        self.toasts = toasts;
     }
 
     // ---- Drag and drop ----

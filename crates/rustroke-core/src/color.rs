@@ -70,6 +70,69 @@ impl Color {
     pub const fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
     }
+
+    /// Hue (0..1, red at 0), saturation and value of the sRGB color, as in
+    /// color pickers, and alpha.
+    pub fn to_hsva(self) -> [f32; 4] {
+        let [r, g, b] = [self.r, self.g, self.b].map(linear_to_srgb);
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let delta = max - min;
+        let hue = if delta <= 0.0 {
+            0.0
+        } else if max == r {
+            ((g - b) / delta).rem_euclid(6.0) / 6.0
+        } else if max == g {
+            ((b - r) / delta + 2.0) / 6.0
+        } else {
+            ((r - g) / delta + 4.0) / 6.0
+        };
+        let saturation = if max <= 0.0 { 0.0 } else { delta / max };
+        [hue, saturation, max, self.a]
+    }
+
+    /// A color from hue (0..1, wraps), saturation and value (0..1) in sRGB
+    /// space, and alpha: the inverse of [`Color::to_hsva`].
+    pub fn from_hsva(h: f32, s: f32, v: f32, a: f32) -> Self {
+        let h = h.rem_euclid(1.0) * 6.0;
+        let (s, v) = (s.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+        let c = v * s;
+        let x = c * (1.0 - (h % 2.0 - 1.0).abs());
+        let (r, g, b) = match h as u32 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        let m = v - c;
+        Self::new(
+            srgb_to_linear(r + m),
+            srgb_to_linear(g + m),
+            srgb_to_linear(b + m),
+            a,
+        )
+    }
+}
+
+/// sRGB-encoded intensity (0..1) → linear.
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Linear intensity → sRGB-encoded (0..1).
+fn linear_to_srgb(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 /// sRGB-encoded 8-bit value → linear intensity. Precomputed so that the
@@ -177,6 +240,24 @@ mod tests {
         assert_eq!(
             Color::new(2.0, -1.0, 0.0, 1.5).to_srgba8(),
             [255, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn hsva_roundtrips() {
+        for c in [
+            Color::from_srgb8(255, 0, 0),
+            Color::from_srgb8(18, 200, 77),
+            Color::from_srgba8(137, 180, 250, 128),
+            Color::WHITE,
+            Color::BLACK,
+        ] {
+            let [h, s, v, a] = c.to_hsva();
+            assert_eq!(Color::from_hsva(h, s, v, a).to_srgba8(), c.to_srgba8());
+        }
+        assert_eq!(
+            Color::from_hsva(1.0 / 3.0, 1.0, 1.0, 1.0).to_srgba8(),
+            [0, 255, 0, 255]
         );
     }
 }

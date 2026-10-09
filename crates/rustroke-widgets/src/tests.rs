@@ -3702,3 +3702,92 @@ fn drag_and_drop_moves_a_payload_between_zones() {
     assert!(!h.ctx.is_dnd_active());
     assert_eq!(columns, [vec!["apple"], vec!["pear"]]);
 }
+
+#[test]
+fn color_picker_opens_and_edits_the_color() {
+    use rustroke_core::Color;
+    let mut h = Harness::new();
+    let mut color = Color::from_srgb8(255, 0, 0);
+    let run = |h: &mut Harness, events, color: &mut Color| {
+        let mut r = None;
+        h.frame(events, |ui| {
+            r = Some(ui.add(crate::ColorPicker::new(color)))
+        });
+        r.unwrap()
+    };
+    let swatch = run(&mut h, vec![], &mut color).rect.center();
+    run(&mut h, click_events(swatch), &mut color);
+    run(&mut h, vec![], &mut color);
+    let field = h.ctx.find_widget("Hex color").expect("picker open");
+    assert_eq!(field.info.value.as_deref(), Some("#FF0000"));
+    // Type a new color in the hex field.
+    let at = field.rect.center();
+    run(&mut h, click_events(at), &mut color);
+    run(&mut h, vec![press_key(Key::End)], &mut color);
+    for _ in 0..7 {
+        run(&mut h, vec![press_key(Key::Backspace)], &mut color);
+    }
+    let r = run(&mut h, vec![text("#3366CC")], &mut color);
+    assert!(r.changed());
+    assert_eq!(color.to_srgba8(), [0x33, 0x66, 0xCC, 255]);
+}
+
+#[test]
+fn date_picker_picks_a_day() {
+    let mut h = Harness::new();
+    let mut date = crate::Date::new(2026, 10, 9).unwrap();
+    let run = |h: &mut Harness, events, date: &mut crate::Date| {
+        let mut r = None;
+        h.frame(events, |ui| r = Some(ui.add(crate::DatePicker::new(date))));
+        r.unwrap()
+    };
+    let at = run(&mut h, vec![], &mut date).rect.center();
+    run(&mut h, click_events(at), &mut date);
+    run(&mut h, vec![], &mut date);
+    assert!(h.ctx.find_widget("October 2026").is_some());
+    let next = h.ctx.find_widget("Next month").unwrap().rect.center();
+    run(&mut h, click_events(next), &mut date);
+    run(&mut h, vec![], &mut date);
+    assert!(h.ctx.find_widget("November 2026").is_some());
+    let day = h.ctx.find_widget("20").unwrap().rect.center();
+    let r = run(&mut h, click_events(day), &mut date);
+    assert!(r.changed());
+    assert_eq!(date.to_string(), "2026-11-20");
+    run(&mut h, vec![], &mut date);
+    assert!(h.ctx.find_widget("November 2026").is_none(), "closed");
+}
+
+#[test]
+fn toasts_appear_expire_and_can_be_dismissed() {
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, events| {
+        h.frame_with(events, crate::show_toasts);
+    };
+    h.ctx.toast(crate::Toast::success("Saved").duration(1.0));
+    h.ctx.toast(crate::Toast::error("Failed"));
+    run(&mut h, vec![]);
+    run(&mut h, vec![]);
+    assert_eq!(
+        h.ctx
+            .widgets()
+            .iter()
+            .filter(|w| w.info.label == "Dismiss")
+            .count(),
+        2
+    );
+    // The first one expires after a second.
+    h.time += 1.5;
+    run(&mut h, vec![]);
+    assert_eq!(
+        h.ctx
+            .widgets()
+            .iter()
+            .filter(|w| w.info.label == "Dismiss")
+            .count(),
+        1
+    );
+    let close = h.ctx.find_widget("Dismiss").unwrap().rect.center();
+    run(&mut h, click_events(close));
+    run(&mut h, vec![]);
+    assert!(h.ctx.find_widget("Dismiss").is_none());
+}

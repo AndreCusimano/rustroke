@@ -616,6 +616,7 @@ impl WindowState {
             platform_events,
         };
         update(&mut frame);
+        rustroke_widgets::show_toasts(&mut frame);
         rustroke_widgets::show_inspector(&mut frame);
         let Frame {
             shapes,
