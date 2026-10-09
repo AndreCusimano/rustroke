@@ -18,7 +18,11 @@ pub(crate) struct InputCollector {
     /// include one).
     pointer: Option<Point>,
     /// Created on first use; `None` inside if the platform has none.
+    #[cfg(not(target_arch = "wasm32"))]
     clipboard: Option<Option<arboard::Clipboard>>,
+    /// In the browser, copied text stays inside the app.
+    #[cfg(target_arch = "wasm32")]
+    clipboard: String,
     /// The finger that drives the pointer, while it touches.
     pointer_touch: Option<u64>,
 }
@@ -167,7 +171,7 @@ impl InputCollector {
                 Some(Key::C) => self.events.push(Event::Copy),
                 Some(Key::X) => self.events.push(Event::Cut),
                 Some(Key::V) => {
-                    if let Some(text) = self.clipboard().and_then(|c| c.get_text().ok()) {
+                    if let Some(text) = self.clipboard_text() {
                         self.events.push(Event::Paste(text));
                     }
                 }
@@ -195,6 +199,7 @@ impl InputCollector {
 }
 
 impl InputCollector {
+    #[cfg(not(target_arch = "wasm32"))]
     fn clipboard(&mut self) -> Option<&mut arboard::Clipboard> {
         self.clipboard
             .get_or_insert_with(|| {
@@ -205,13 +210,33 @@ impl InputCollector {
             .as_mut()
     }
 
+    /// The text on the clipboard, if any.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clipboard_text(&mut self) -> Option<String> {
+        self.clipboard().and_then(|c| c.get_text().ok())
+    }
+
+    /// The text copied in this app (browsers only let pages read the
+    /// system clipboard asynchronously, after asking).
+    #[cfg(target_arch = "wasm32")]
+    fn clipboard_text(&mut self) -> Option<String> {
+        (!self.clipboard.is_empty()).then(|| self.clipboard.clone())
+    }
+
     /// Puts `text` on the system clipboard.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_clipboard_text(&mut self, text: String) {
         if let Some(clipboard) = self.clipboard()
             && let Err(e) = clipboard.set_text(text)
         {
             log::warn!("failed to copy to the clipboard: {e}");
         }
+    }
+
+    /// Keeps `text` for pasting inside the app.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn set_clipboard_text(&mut self, text: String) {
+        self.clipboard = text;
     }
 }
 

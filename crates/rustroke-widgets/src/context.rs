@@ -382,6 +382,8 @@ pub struct Context {
     active: Option<Id>,
     /// The button that made `active` active.
     active_button: PointerButton,
+    /// The active widget reacts to drags itself (sliders, text fields).
+    active_drags: bool,
     /// The primary button was pressed on empty space and is still down:
     /// no widget should react until it is released.
     pressed_on_background: bool,
@@ -444,6 +446,7 @@ impl Default for Context {
             style: Arc::new(Style::default()),
             active: None,
             active_button: PointerButton::Primary,
+            active_drags: false,
             pressed_on_background: false,
             focused: None,
             focus_visible: false,
@@ -1072,6 +1075,7 @@ impl Context {
             if let (true, Some(button)) = (response.hovered, pressed) {
                 self.active = Some(id);
                 self.active_button = button;
+                self.active_drags = sense.drag;
                 let primary = button == PointerButton::Primary;
                 response.drag_started = sense.drag && primary;
                 if primary {
@@ -1238,6 +1242,11 @@ impl Context {
         let payload = self.dnd_payload::<P>()?;
         self.dnd = None;
         Some(payload)
+    }
+
+    /// Whether the widget being pressed handles drags itself.
+    pub(crate) fn active_drags(&self) -> bool {
+        self.active.is_some() && self.active_drags
     }
 
     pub(crate) fn dnd_source(&self) -> Option<(Id, Vec2)> {

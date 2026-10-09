@@ -1,0 +1,17 @@
+[package]
+name = "rustroke-soft"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Software renderer for rustroke meshes: draws on the CPU, without a GPU."
+
+[lints]
+workspace = true
+
+[dependencies]
+rustroke-core.workspace = true

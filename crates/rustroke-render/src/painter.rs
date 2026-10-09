@@ -425,7 +425,7 @@ impl Painter {
         };
         set_ui_state(&mut pass);
 
-        let (mut index_offset, mut vertex_offset) = (0u32, 0i32);
+        let mut index_offset = 0u32;
         for (i, clipped) in job.meshes.iter().enumerate() {
             if clipped.callback.is_some() {
                 if let Some((_, callback, info)) = callbacks.iter().find(|(j, ..)| *j == i) {
@@ -457,14 +457,9 @@ impl Painter {
             {
                 pass.set_bind_group(0, &texture.bind_group, &[]);
                 pass.set_scissor_rect(x, y, w, h);
-                pass.draw_indexed(
-                    index_offset..index_offset + index_count,
-                    vertex_offset,
-                    0..1,
-                );
+                pass.draw_indexed(index_offset..index_offset + index_count, 0, 0..1);
             }
             index_offset += index_count;
-            vertex_offset += clipped.mesh.vertices.len() as i32;
         }
     }
 
@@ -511,14 +506,18 @@ impl Painter {
     ) {
         self.vertex_data.clear();
         self.index_data.clear();
+        let mut base = 0u32;
         for m in meshes {
             for v in &m.mesh.vertices {
                 self.vertex_data
                     .extend_from_slice(&[v.pos.x, v.pos.y, v.uv[0], v.uv[1]]);
                 self.vertex_data.extend_from_slice(&v.color);
             }
-            // Indices stay mesh-relative; draw_indexed applies a base vertex.
-            self.index_data.extend_from_slice(&m.mesh.indices);
+            // Indices point into the shared vertex buffer: WebGL can't
+            // draw with a base vertex.
+            self.index_data
+                .extend(m.mesh.indices.iter().map(|i| i + base));
+            base += m.mesh.vertices.len() as u32;
         }
         let vertex_bytes: &[u8] = bytemuck::cast_slice(&self.vertex_data);
         let index_bytes: &[u8] = bytemuck::cast_slice(&self.index_data);

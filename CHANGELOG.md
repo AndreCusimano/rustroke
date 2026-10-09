@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-10-09
+
+### Added
+
+- **Apps in the browser**: the same `rustroke::run` app compiles to
+  `wasm32-unknown-unknown` and draws into a canvas added to the page,
+  with WebGPU or, where it is missing, WebGL 2. `tools/web.sh <example>`
+  builds an example for the web (needs `wasm-bindgen-cli`). In the
+  browser the GPU is set up asynchronously, `run` returns right away,
+  copy and paste stay inside the app, panics are printed to the console,
+  and screen readers, native menus, the tray icon, notifications and
+  saving state are not available yet. CI builds the `widgets` example for
+  wasm.
+- **Software renderer**: new crate `rustroke-soft` (re-exported as
+  `rustroke::SoftwareRenderer`) draws the same meshes on the CPU, with the
+  GPU's conventions (linear blending, sRGB, bilinear sampling, scissors),
+  for machines without a GPU; `testing::Harness::render_software()`.
+
+### Changed
+
+- `Ui::dnd_drag_source` also starts dragging when the press is on a widget
+  inside that doesn't drag by itself (e.g. a card made of a button), after
+  the pointer moves 4 points.
+- In the browser the canvas fills the page and follows its size.
+- `testing::Harness` draws toasts, like a real window.
+- The README has a gallery: code next to the image it draws (rendered by
+  `cargo test -p rustroke --test gallery --features markdown -- --ignored`).
+- The painter offsets indices on the CPU instead of drawing with a base
+  vertex, which WebGL doesn't support (pages with several clipped areas
+  crashed there).
+- `rustroke-render` creates its wgpu instance with WebGPU detection, so
+  browsers without WebGPU fall back to WebGL 2.
+- `rustroke-winit` uses `web-time` for timing, and its desktop-only
+  dependencies (arboard, accesskit_winit, pollster) are not built for
+  wasm.
+
 ## [0.16.0] — 2026-10-09
 
 ### Added
@@ -542,7 +578,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/AndreCusimano/rustroke/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/AndreCusimano/rustroke/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/AndreCusimano/rustroke/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/AndreCusimano/rustroke/compare/v0.13.0...v0.14.0

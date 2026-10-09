@@ -79,9 +79,11 @@ impl Renderer {
     where
         W: Into<wgpu::SurfaceTarget<'static>> + WgpuHasDisplayHandle + Clone,
     {
-        let instance = wgpu::Instance::new(
+        // In browsers without WebGPU this falls back to WebGL 2.
+        let instance = wgpu::util::new_instance_with_webgpu_detection(
             wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(window.clone())),
-        );
+        )
+        .await;
         let surface = instance
             .create_surface(window)
             .map_err(RendererError::CreateSurface)?;

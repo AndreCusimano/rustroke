@@ -32,6 +32,7 @@ use rustroke_core::{
     Color, ColorImage, DisplayList, Event, Key, Modifiers, PhysicalSize, Point, PointerButton,
     RawInput, Rect, Tessellator, TextureId, TexturesDelta, vec2,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use rustroke_render::{OffscreenRenderer, PaintJob, RendererError};
 use rustroke_text::Fonts;
 use rustroke_widgets::{Context, FrameOutput, Id, WidgetDescription};
@@ -53,6 +54,7 @@ pub struct Harness {
     /// Every texture still alive, for rendering (each frame's
     /// `TexturesDelta` only has the changes).
     textures: Vec<(TextureId, ColorImage)>,
+    #[cfg(not(target_arch = "wasm32"))]
     renderer: Option<OffscreenRenderer>,
     /// Extra windows requested by the last frame.
     windows: Vec<(Id, WindowOptions)>,
@@ -135,6 +137,7 @@ impl Harness {
             output: FrameOutput::default(),
             frames: 0,
             textures: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             renderer: None,
             windows: Vec::new(),
             window_contexts: Vec::new(),
@@ -194,6 +197,8 @@ impl Harness {
             platform_events: Default::default(),
         };
         app.update(&mut frame);
+        // Like the real window: toasts over the app.
+        rustroke_widgets::show_toasts(&mut frame);
         let Frame {
             mut shapes,
             clear_color,
@@ -379,6 +384,29 @@ impl Harness {
         self.title.as_deref()
     }
 
+    /// Like [`Harness::render`], drawn on the CPU by `rustroke_soft`
+    /// instead of the GPU: works on machines without a GPU (CI, virtual
+    /// machines), slower, and very close to the GPU's output.
+    pub fn render_software(&self) -> Screenshot {
+        let ppp = self.pixels_per_point;
+        let size = PhysicalSize::new(
+            (self.screen_rect.width() * ppp).round() as u32,
+            (self.screen_rect.height() * ppp).round() as u32,
+        );
+        let meshes = Tessellator::new(ppp, self.fonts.atlas()).tessellate(&self.shapes);
+        let mut renderer = rustroke_soft::SoftwareRenderer::new();
+        renderer.update_textures(&TexturesDelta {
+            set: self.textures.clone(),
+            free: Vec::new(),
+        });
+        let image = renderer.render(&meshes, self.fonts.atlas(), size, ppp, self.clear_color);
+        Screenshot {
+            size: image.size,
+            pixels: image.pixels,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     /// Draws the last frame on the GPU, without a window. The first call
     /// creates the renderer (slow, ~0.1 s); later calls reuse it. Fails
     /// when the machine has no usable GPU adapter (e.g. some CI runners):
@@ -571,6 +599,49 @@ mod tests {
         assert!(!h.close_requested());
         assert!(h.click(&mut app, "Discard"));
         assert!(h.close_requested());
+    }
+
+    /// The software renderer draws (almost) what the GPU draws.
+    #[test]
+    fn software_rendering_matches_the_gpu() {
+        let mut app = |frame: &mut Frame| {
+            frame.clear_color = frame.ctx().style().visuals.background;
+            frame.ui(|ui| {
+                ui.heading("Software");
+                ui.button("A button");
+                ui.checkbox(&mut true.clone(), "Checked");
+                ui.add(rustroke_widgets::Slider::new(
+                    &mut 0.4_f32.clone(),
+                    0.0..=1.0,
+                ));
+            });
+        };
+        let mut h = Harness::with_size(240.0, 160.0).with_pixels_per_point(2.0);
+        h.run(&mut app);
+        h.advance_time(1.0);
+        h.run(&mut app);
+        let soft = h.render_software();
+        assert_eq!(soft.size, [480, 320]);
+        let gpu = match h.render() {
+            Ok(gpu) => gpu,
+            Err(e) => {
+                eprintln!("skipping the GPU comparison: {e}");
+                return;
+            }
+        };
+        let differing = soft
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(gpu.pixels.as_chunks::<4>().0)
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24))
+            .count();
+        let total = (soft.size[0] * soft.size[1]) as usize;
+        assert!(
+            differing * 200 < total,
+            "{differing} of {total} pixels differ"
+        );
     }
 
     /// TST-04: textures loaded in earlier frames are still drawn.

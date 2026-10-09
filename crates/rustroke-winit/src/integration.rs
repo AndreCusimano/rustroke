@@ -2,7 +2,9 @@
 //! loop and wgpu device (e.g. a game or a CAD program with its own
 //! renderer), instead of [`crate::run`].
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use rustroke_core::{
     ClippedMesh, Color, DisplayList, PhysicalSize, RawInput, Rect, Tessellator, TexturesDelta,

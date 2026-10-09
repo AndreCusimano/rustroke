@@ -3897,3 +3897,37 @@ fn flex_grid_places_cells_in_fraction_columns() {
     assert!((rects[3].width() - 400.0).abs() < 0.5, "spans all columns");
     assert!(rects[3].min.y >= rects[0].max.y);
 }
+
+#[test]
+fn drag_sources_made_of_buttons_can_be_dragged() {
+    let mut h = Harness::new();
+    let mut dropped = None;
+    let run = |h: &mut Harness, events, dropped: &mut Option<u32>| {
+        h.frame(events, |ui| {
+            ui.dnd_drag_source(crate::Id::new("card"), 7_u32, |ui| {
+                ui.button("Card");
+            });
+            ui.add_space(40.0);
+            let (_, d) = ui.dnd_drop_zone::<u32, _>(|ui| {
+                ui.add_sized(vec2(200.0, 60.0), crate::Label::new("Zone"));
+            });
+            if let Some(d) = d {
+                *dropped = Some(*d);
+            }
+        });
+    };
+    run(&mut h, vec![], &mut dropped);
+    run(&mut h, vec![], &mut dropped);
+    let card = h.ctx.find_widget("Card").unwrap().rect.center();
+    let zone = h.ctx.find_widget("Zone").unwrap().rect.center();
+    run(
+        &mut h,
+        vec![move_to(card), button(card, true)],
+        &mut dropped,
+    );
+    run(&mut h, vec![move_to(card + vec2(10.0, 0.0))], &mut dropped);
+    assert!(h.ctx.is_dnd_active(), "dragging from the button");
+    run(&mut h, vec![move_to(zone)], &mut dropped);
+    run(&mut h, vec![button(zone, false)], &mut dropped);
+    assert_eq!(dropped, Some(7));
+}

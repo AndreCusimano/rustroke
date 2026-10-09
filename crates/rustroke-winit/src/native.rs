@@ -126,7 +126,15 @@ pub fn notify(title: &str, body: &str) -> std::io::Result<()> {
             .spawn()
             .map(drop)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (title, body);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "notifications are not supported in the browser yet",
+        ))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_arch = "wasm32")))]
     {
         std::process::Command::new("notify-send")
             .args([title, body])

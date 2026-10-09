@@ -9,6 +9,10 @@ use rustroke_core::{Rect, Stroke, Vec2};
 use crate::context::Order;
 use crate::{CursorIcon, Id, InnerResponse, LayerId, Sense, Ui};
 
+/// Pointer movement (points) before pressing a widget inside a drag
+/// source starts dragging it.
+const DRAG_THRESHOLD: f32 = 4.0;
+
 impl Ui<'_> {
     /// Content that can be dragged: pressing on it (outside its own
     /// buttons and fields) and moving starts a drag carrying `payload`.
@@ -79,10 +83,24 @@ impl Ui<'_> {
         if response.hovered() {
             self.ctx().set_cursor(CursorIcon::Grab);
         }
-        if response.drag_started() {
-            let pointer = self.input().pointer.press_origin().unwrap_or(used.min);
-            self.ctx()
-                .start_dnd(id, Arc::new(payload), pointer - used.min);
+        // Dragging also starts from widgets inside that don't drag
+        // themselves (e.g. a card that is a button), once the pointer has
+        // moved a little; sliders and text fields keep their own drags.
+        let pointer = self.input().pointer.clone();
+        let origin = pointer.press_origin();
+        let from_inside = !response.drag_started()
+            && pointer.primary_down()
+            && !self.ctx().is_dnd_active()
+            && !self.ctx().active_drags()
+            && origin.is_some_and(|o| used.contains(o))
+            && pointer
+                .pos()
+                .zip(origin)
+                .is_some_and(|(p, o)| (p - o).length() > DRAG_THRESHOLD);
+        if response.drag_started() || from_inside {
+            let grab = origin.unwrap_or(used.min) - used.min;
+            self.ctx().start_dnd(id, Arc::new(payload), grab);
+            self.ctx().request_repaint();
         }
         let mut response = response;
         response.rect = used;

@@ -155,10 +155,14 @@
 //! - **More windows**: keep extra native windows open with
 //!   [`Frame::show_window`] (e.g. a view on a second monitor) and draw
 //!   them in [`App::update_window`].
+//! - **In the browser**: the same app compiles to `wasm32-unknown-unknown`
+//!   and runs in a canvas with WebGPU or WebGL 2 (build an example with
+//!   `tools/web.sh <example>`).
 //! - **Testing**: [`testing::Harness`] runs your app without a window;
 //!   click widgets by label, type text, press keys, inspect
 //!   [`Context::widgets`] and the accessibility tree, and render the
-//!   frame to an image. [`Context::automation`] drives a running app from
+//!   frame to an image on the GPU or, without one, with the
+//!   [`SoftwareRenderer`]. [`Context::automation`] drives a running app from
 //!   another thread the same way.
 //! - **Saving state** (feature `persistence`): with
 //!   [`WindowOptions::persistence_id`] window positions, panel sizes,
@@ -189,6 +193,8 @@ pub use rustroke_core::{
     Point, PointerButton, RawInput, Rect, Shadow, Shape, Stroke, TextureId, TexturesDelta,
     Transform, Vec2, Vertex, point, vec2,
 };
+/// Drawing on the CPU, without a GPU (see `testing::Harness::render_software`).
+pub use rustroke_soft::SoftwareRenderer;
 pub use rustroke_text::{
     FontFamily, Fonts, ICON_ACCENT_SOURCE_COLOR, IconError, IconId, IconLayer, LayoutJob,
     RasterizedIcon, TextFormat, TextStyle,

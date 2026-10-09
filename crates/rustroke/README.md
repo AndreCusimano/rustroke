@@ -20,7 +20,7 @@ keep in sync.
 
 ```toml
 [dependencies]
-rustroke = { git = "https://github.com/AndreCusimano/rustroke" }
+rustroke = "0.17"
 ```
 
 A window with a label, in a couple of lines:
@@ -79,6 +79,184 @@ fn main() -> Result<(), rustroke::RunError> {
 }
 ```
 
+## Gallery
+
+A few things Rustroke can do: the code on the left draws the image on the
+right (the images are rendered from this code by
+`cargo test -p rustroke --test gallery --features markdown -- --ignored`).
+
+<table>
+<tr>
+<td width="50%">
+
+**Widgets**
+
+```rust,ignore
+ui.heading("Settings");
+ui.checkbox(&mut dark, "Dark theme");
+ui.add(Slider::new(&mut volume, 0..=100)
+    .text("Volume"));
+ComboBox::from_label("Quality")
+    .selected_text(quality)
+    .show_ui(ui, |ui| {
+        for q in ["Low", "Medium", "High"] {
+            ui.selectable_value(&mut quality, q, q);
+        }
+    });
+ui.add(TextEdit::singleline(&mut name)
+    .hint_text("Your name"));
+ui.horizontal(|ui| {
+    ui.button("Cancel");
+    ui.button("Save");
+});
+```
+
+</td>
+<td width="50%"><img src="https://raw.githubusercontent.com/AndreCusimano/rustroke/main/docs/images/widgets.png" width="100%" alt="A settings form with a checkbox, a slider, a combo box, a text field and buttons"></td>
+</tr>
+<tr>
+<td width="50%">
+
+**Panels, menus, trees and grids**
+
+```rust,ignore
+Panel::top("menu").show(frame, |ui| {
+    ui.horizontal(|ui| {
+        ui.menu_button("File", |ui| ui.button("Open"));
+        ui.menu_button("Edit", |ui| ui.button("Undo"));
+        ui.menu_button("View", |ui| ui.button("Zoom"));
+    });
+});
+Panel::bottom("status").show(frame, |ui| ui.label("Ready"));
+Panel::left("tree").show(frame, |ui| {
+    let parts = CollapsingHeader::new("Parts");
+    parts.default_open(true).show(ui, |ui| {
+        ui.label("Housing");
+        ui.label("Cover");
+        ui.label("Screws");
+    });
+});
+CentralPanel.show(frame, |ui| {
+    ui.heading("Housing");
+    let grid = Grid::new("props").striped(true);
+    grid.show(ui, |ui| {
+        ui.label("Material");
+        ui.label("Aluminium");
+        ui.end_row();
+        // ...
+    });
+});
+```
+
+</td>
+<td width="50%"><img src="https://raw.githubusercontent.com/AndreCusimano/rustroke/main/docs/images/layout.png" width="100%" alt="A menu bar, a side panel with a tree, a status bar and a property grid"></td>
+</tr>
+<tr>
+<td width="50%">
+
+**Tables (sortable, resizable, millions of rows)**
+
+```rust,ignore
+Table::new("parts")
+    .column(Column::new("Part").sortable(true))
+    .column(Column::new("Material"))
+    .column(Column::new("Qty").align(Align::Max))
+    .show(ui, rows, &mut selected, |ui, row, col| {
+        let (part, material, qty) = parts[row];
+        match col {
+            0 => ui.label(part),
+            1 => ui.label(material),
+            _ => ui.label(qty.to_string()),
+        };
+    });
+```
+
+</td>
+<td width="50%"><img src="https://raw.githubusercontent.com/AndreCusimano/rustroke/main/docs/images/table.png" width="100%" alt="A table of parts with a selected row"></td>
+</tr>
+<tr>
+<td width="50%">
+
+**Rich text and Markdown**
+
+```rust,ignore
+let mut job = LayoutJob::default();
+job.append("Rich text: ", TextFormat::new());
+let bold = TextStyle::proportional(14.0).bold();
+job.append("bold", TextFormat::new().style(bold));
+job.append(", ", TextFormat::new());
+job.append("colored", TextFormat::new().color(pink));
+job.append(" and a ", TextFormat::new());
+let docs = "https://docs.rs/rustroke";
+job.append("link", TextFormat::new().link(docs));
+ui.add(Label::rich(job));
+
+ui.markdown(
+    "## Markdown\n\
+     - **bold**, *italic*, `code`\n\
+     - [x] task lists\n\n\
+     > quotes, tables, code blocks…",
+);
+```
+
+</td>
+<td width="50%"><img src="https://raw.githubusercontent.com/AndreCusimano/rustroke/main/docs/images/text.png" width="100%" alt="Rich text with bold, colored and linked words, and rendered Markdown"></td>
+</tr>
+<tr>
+<td width="50%">
+
+**Drawing**
+
+```rust,ignore
+let s = &mut frame.shapes;
+let card = Rect::from_min_size(
+    point(30.0, 30.0), vec2(170.0, 110.0));
+s.shadow(card, 14.0, Shadow {
+    offset: vec2(0.0, 10.0),
+    blur: 24.0,
+    spread: 0.0,
+    color: Color::BLACK.with_alpha(0.6),
+});
+let sky = Gradient::linear(
+    card.left_top(), card.right_bottom(), blue, pink);
+s.rect_gradient(card, 14.0, sky, Stroke::NONE);
+s.cubic_bezier([a, b, c, d], Stroke::new(3.0, green));
+s.dashed_line(&[e, f], Stroke::new(2.0, blue), 9.0, 6.0);
+let turn = Transform::rotate_around(center, 0.4);
+s.with_transform(turn, |s| {
+    s.rect_stroke(r, 8.0, Stroke::new(2.5, pink));
+});
+```
+
+</td>
+<td width="50%"><img src="https://raw.githubusercontent.com/AndreCusimano/rustroke/main/docs/images/graphics.png" width="100%" alt="A gradient card with a soft shadow, a Bézier curve, a dashed line and a rotated rectangle"></td>
+</tr>
+<tr>
+<td width="50%">
+
+**Dialogs and toasts**
+
+```rust,ignore
+if exported {
+    let done = Toast::success("Exported drawing.pdf");
+    frame.ctx().toast(done);
+}
+let dialog = Modal::new("save").title("Save changes?");
+dialog.show(frame, |ui| {
+    ui.label("Your changes are lost if you don't save them.");
+    ui.horizontal(|ui| {
+        ui.button("Don't save");
+        ui.button("Cancel");
+        ui.button("Save");
+    });
+});
+```
+
+</td>
+<td width="50%"><img src="https://raw.githubusercontent.com/AndreCusimano/rustroke/main/docs/images/dialog.png" width="100%" alt="A modal dialog over the dimmed window, and a toast in the corner"></td>
+</tr>
+</table>
+
 ## Features
 
 - **Widgets**: labels, buttons, checkboxes, radio buttons, selectable labels,
@@ -134,6 +312,10 @@ fn main() -> Result<(), rustroke::RunError> {
 - **More windows**: extra native windows (e.g. a view on a second monitor),
   sharing the app's state. On macOS the app can draw its own top bar next
   to the window buttons (unified title bar).
+- **In the browser**: the same app compiles to WebAssembly and runs in a
+  canvas with WebGPU or WebGL 2 (`tools/web.sh <example>` builds one).
+- **No GPU needed for tests**: a software renderer draws frames on the CPU
+  (`Harness::render_software`).
 - **Your own event loop**: embed the UI in an app that already owns its
   winit window and wgpu device (`rustroke::Integration`).
 - **State and tools**: UI state, window geometry and app values saved
@@ -224,10 +406,13 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.8: the core is complete and tested (interaction tests without a
-window, GPU snapshot tests, CI on macOS, Windows and Linux). Known limitations
-are listed in the [changelog](CHANGELOG.md). Coming next: extending and
-customizing shapes, and a visual screen designer built with Rustroke itself.
+Version 0.17: widgets, layouts (including flexbox and grids), tables and
+trees, rich text and Markdown, gradients and shadows, drag and drop, saved
+state, accessibility, desktop and browser builds. Everything is tested
+(interaction tests without a window, GPU and software snapshot tests, CI on
+macOS, Windows, Linux and WebAssembly). Known limitations are listed in the
+[changelog](CHANGELOG.md). Coming next: a visual screen designer built with
+Rustroke itself.
 
 ## Development
 

@@ -19,6 +19,7 @@ rustroke-core.workspace = true
 rustroke-winit.workspace = true
 rustroke-text.workspace = true
 rustroke-widgets.workspace = true
+rustroke-soft.workspace = true
 image = { workspace = true, optional = true }
 
 [features]
@@ -49,4 +50,8 @@ all-features = true
 
 [[example]]
 name = "rich_text"
+required-features = ["markdown"]
+
+[[test]]
+name = "gallery"
 required-features = ["markdown"]

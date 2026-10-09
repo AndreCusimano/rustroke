@@ -15,17 +15,30 @@ workspace = true
 
 [dependencies]
 winit.workspace = true
-pollster.workspace = true
-arboard.workspace = true
 accesskit.workspace = true
-accesskit_winit.workspace = true
 log.workspace = true
+web-time = "1"
+wgpu.workspace = true
 png.workspace = true
 rustroke-core.workspace = true
 rustroke-render.workspace = true
+rustroke-soft.workspace = true
 rustroke-text.workspace = true
 rustroke-widgets.workspace = true
 serde_json = { workspace = true, optional = true }
+
+# The desktop: system clipboard, screen readers, blocking GPU setup.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster.workspace = true
+arboard.workspace = true
+accesskit_winit.workspace = true
+
+# The browser: async GPU setup on WebGPU, or WebGL 2 where it is missing.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, features = ["webgl"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "CssStyleDeclaration", "HtmlElement", "console"] }
 
 # Native menu bar (macOS) and tray icon (macOS, Windows); tray-icon
 # re-exports the `muda` menus.

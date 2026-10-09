@@ -7,7 +7,9 @@ pub mod testing;
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use input::InputCollector;
 use rustroke_core::{
@@ -403,11 +405,13 @@ impl std::error::Error for RunError {}
 #[derive(Debug)]
 enum UserEvent {
     /// From the accessibility adapter (screen reader requests).
+    #[cfg(not(target_arch = "wasm32"))]
     AccessKit(accesskit_winit::Event),
     /// A `RepaintHandle` asked for a frame.
     Repaint,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<accesskit_winit::Event> for UserEvent {
     fn from(event: accesskit_winit::Event) -> Self {
         Self::AccessKit(event)
@@ -415,7 +419,29 @@ impl From<accesskit_winit::Event> for UserEvent {
 }
 
 /// Opens a window and runs `app` until the window is closed.
+///
+/// In the browser (wasm32) the app draws into a canvas added to the page,
+/// and this returns right away: the browser drives the event loop.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(options: WindowOptions, app: impl App) -> Result<(), RunError> {
+    run_impl(options, app)
+}
+
+/// Opens a window and runs `app` until the window is closed.
+///
+/// In the browser (wasm32) the app draws into a canvas added to the page,
+/// and this returns right away: the browser drives the event loop.
+#[cfg(target_arch = "wasm32")]
+pub fn run(options: WindowOptions, app: impl App + 'static) -> Result<(), RunError> {
+    run_impl(options, app)
+}
+
+/// The event loop and the runner driving `app` in it.
+#[cfg_attr(not(feature = "persistence"), allow(unused_mut))]
+fn make_runner<A: App>(
+    options: WindowOptions,
+    app: A,
+) -> Result<(EventLoop<UserEvent>, Runner<A>), RunError> {
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(RunError::EventLoop)?;
@@ -425,7 +451,12 @@ pub fn run(options: WindowOptions, app: impl App) -> Result<(), RunError> {
         options,
         app,
         start: Instant::now(),
-        fonts: Fonts::new(),
+        // Browsers have no system fonts to load.
+        fonts: if cfg!(target_arch = "wasm32") {
+            Fonts::bundled_only()
+        } else {
+            Fonts::new()
+        },
         proxy,
         main: None,
         extras: Vec::new(),
@@ -442,10 +473,30 @@ pub fn run(options: WindowOptions, app: impl App) -> Result<(), RunError> {
     };
     #[cfg(feature = "persistence")]
     persistence::restore(&mut runner);
+    Ok((event_loop, runner))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_impl<A: App>(options: WindowOptions, app: A) -> Result<(), RunError> {
+    let (event_loop, mut runner) = make_runner(options, app)?;
     event_loop
         .run_app(&mut runner)
         .map_err(RunError::EventLoop)?;
     runner.error.map_or(Ok(()), Err)
+}
+
+/// In the browser the event loop runs after this returns, driven by the
+/// page's events.
+#[cfg(target_arch = "wasm32")]
+fn run_impl<A: App + 'static>(options: WindowOptions, app: A) -> Result<(), RunError> {
+    use winit::platform::web::EventLoopExtWebSys;
+    // Panics would otherwise only show as "unreachable" in the console.
+    std::panic::set_hook(Box::new(|info| {
+        web_sys::console::error_1(&info.to_string().into());
+    }));
+    let (event_loop, runner) = make_runner(options, app)?;
+    event_loop.spawn_app(runner);
+    Ok(())
 }
 
 struct Runner<A> {
@@ -479,8 +530,14 @@ struct Runner<A> {
 /// One native window with its own UI state and renderer.
 struct WindowState {
     window: Arc<Window>,
-    renderer: Renderer,
+    /// `None` until the GPU is set up (in the browser that happens
+    /// asynchronously, see `pending_renderer`).
+    renderer: Option<Renderer>,
+    /// In the browser: where the renderer arrives once created.
+    #[cfg(target_arch = "wasm32")]
+    pending_renderer: std::rc::Rc<std::cell::RefCell<Option<Result<Renderer, RendererError>>>>,
     /// Connects the UI to the platform's screen readers.
+    #[cfg(not(target_arch = "wasm32"))]
     accesskit: accesskit_winit::Adapter,
     ctx: Context,
     input: InputCollector,
@@ -519,6 +576,12 @@ impl WindowState {
                 .with_title_hidden(options.unified_titlebar)
                 .with_fullsize_content_view(options.unified_titlebar)
         };
+        // In the browser the window is a canvas added to the page.
+        #[cfg(target_arch = "wasm32")]
+        let attributes = {
+            use winit::platform::web::WindowAttributesExtWebSys;
+            attributes.with_append(true)
+        };
         let titlebar_height = if cfg!(target_os = "macos") && options.unified_titlebar {
             MACOS_TITLEBAR_HEIGHT
         } else {
@@ -529,12 +592,50 @@ impl WindowState {
                 .create_window(attributes)
                 .map_err(RunError::CreateWindow)?,
         );
+        #[cfg(not(target_arch = "wasm32"))]
         let accesskit =
             accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, proxy.clone());
+        // In the browser the main canvas fills the page and follows its
+        // size (winit reports the changes as `Resized`).
+        #[cfg(target_arch = "wasm32")]
+        if let Some(canvas) = winit::platform::web::WindowExtWebSys::canvas(&*window) {
+            let style = canvas.style();
+            for (name, value) in [
+                ("position", "fixed"),
+                ("left", "0"),
+                ("top", "0"),
+                ("width", "100vw"),
+                ("height", "100vh"),
+                ("display", "block"),
+                ("outline", "none"),
+            ] {
+                let _ = style.set_property(name, value);
+            }
+        }
         window.set_visible(true);
         let size = to_physical(window.inner_size());
-        let renderer = pollster::block_on(Renderer::new(Arc::clone(&window), size, fonts.atlas()))
-            .map_err(RunError::Renderer)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let renderer = Some(
+            pollster::block_on(Renderer::new(Arc::clone(&window), size, fonts.atlas()))
+                .map_err(RunError::Renderer)?,
+        );
+        // Browsers set up the GPU asynchronously: frames start once it is
+        // ready.
+        #[cfg(target_arch = "wasm32")]
+        let (renderer, pending_renderer) = {
+            let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+            let (target, atlas, ready) = (
+                Arc::clone(&window),
+                fonts.atlas().clone(),
+                std::rc::Rc::clone(&slot),
+            );
+            wasm_bindgen_futures::spawn_local(async move {
+                let renderer = Renderer::new(Arc::clone(&target), size, &atlas).await;
+                *ready.borrow_mut() = Some(renderer);
+                target.request_redraw();
+            });
+            (None, slot)
+        };
         let mut ctx = Context::new();
         let wake = std::sync::Mutex::new(proxy.clone());
         ctx.set_repaint_callback(move || {
@@ -548,6 +649,9 @@ impl WindowState {
         Ok(Self {
             window,
             renderer,
+            #[cfg(target_arch = "wasm32")]
+            pending_renderer,
+            #[cfg(not(target_arch = "wasm32"))]
             accesskit,
             ctx,
             input: InputCollector::default(),
@@ -577,7 +681,29 @@ impl WindowState {
         // Window scale factors are small values like 1.0, 1.5 or 2.0.
         #[allow(clippy::cast_possible_truncation)]
         let pixels_per_point = self.window.scale_factor() as f32 * self.ctx.zoom_factor();
-        let size = self.renderer.size();
+        #[cfg(target_arch = "wasm32")]
+        if self.renderer.is_none()
+            && let Some(result) = self.pending_renderer.borrow_mut().take()
+        {
+            match result {
+                Ok(mut renderer) => {
+                    // The canvas may have been resized while the GPU was
+                    // being set up.
+                    renderer.resize(to_physical(self.window.inner_size()));
+                    self.renderer = Some(renderer);
+                }
+                Err(e) => {
+                    web_sys::console::error_1(
+                        &format!("rustroke: could not set up the GPU: {e}").into(),
+                    );
+                }
+            }
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            // Not ready yet: a frame is requested when it is.
+            return (Vec::new(), false, false, PlatformRequests::default());
+        };
+        let size = renderer.size();
         let screen_rect = Rect::from_min_max(
             point(0.0, 0.0),
             point(
@@ -605,7 +731,7 @@ impl WindowState {
             request_repaint: false,
             fonts: &mut *fonts,
             ctx: &mut self.ctx,
-            renderer: Some(&mut self.renderer),
+            renderer: Some(&mut *renderer),
             title: None,
             windows: Vec::new(),
             window_id,
@@ -637,6 +763,7 @@ impl WindowState {
         self.clear_color = clear_color;
         fonts.end_frame();
         let mut output = self.ctx.end_frame();
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(update) = output.accesskit_update.take() {
             self.accesskit.update_if_active(|| update);
         }
@@ -678,13 +805,14 @@ impl WindowState {
             clear_color,
         };
         self.window.pre_present_notify();
-        let outcome = self.renderer.render(&job, fonts.atlas_mut());
+        let outcome = renderer.render(&job, fonts.atlas_mut());
         if outcome == RenderOutcome::Retry || request_repaint || output.repaint {
             self.window.request_redraw();
         }
         (windows, had_input, close, platform)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_accesskit(&mut self, event: accesskit_winit::WindowEvent) {
         match event {
             accesskit_winit::WindowEvent::InitialTreeRequested => {
@@ -850,6 +978,7 @@ impl<A: App> Runner<A> {
 impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
+            #[cfg(not(target_arch = "wasm32"))]
             UserEvent::AccessKit(event) => {
                 if let Some(state) = self.window_state(event.window_id) {
                     state.on_accesskit(event.window_event);
@@ -923,6 +1052,7 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
         let Some(state) = self.window_state(id) else {
             return;
         };
+        #[cfg(not(target_arch = "wasm32"))]
         state.accesskit.process_event(&state.window, &event);
         match event {
             WindowEvent::CloseRequested if is_main => {
@@ -952,7 +1082,9 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
                 }
             }
             WindowEvent::Resized(size) => {
-                state.renderer.resize(to_physical(size));
+                if let Some(renderer) = state.renderer.as_mut() {
+                    renderer.resize(to_physical(size));
+                }
                 state.window.request_redraw();
             }
             WindowEvent::RedrawRequested => self.redraw(event_loop, id),
@@ -1078,16 +1210,25 @@ pub(crate) fn needs_frame(event: &WindowEvent, ctx: &Context, input: &InputColle
 /// Opens `url` with the platform's default handler (the browser for web
 /// links), without waiting for it.
 pub(crate) fn open_url(url: &str) {
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(url).spawn();
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("rundll32")
-        .args(["url.dll,FileProtocolHandler", url])
-        .spawn();
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let result = std::process::Command::new("xdg-open").arg(url).spawn();
-    if let Err(e) = result {
-        log::warn!("could not open {url}: {e}");
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            let _ = window.open_with_url_and_target(url, "_blank");
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        #[cfg(target_os = "macos")]
+        let result = std::process::Command::new("open").arg(url).spawn();
+        #[cfg(target_os = "windows")]
+        let result = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn();
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let result = std::process::Command::new("xdg-open").arg(url).spawn();
+        if let Err(e) = result {
+            log::warn!("could not open {url}: {e}");
+        }
     }
 }
 
