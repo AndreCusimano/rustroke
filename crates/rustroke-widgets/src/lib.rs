@@ -31,9 +31,11 @@ mod property_grid;
 mod response;
 mod search_field;
 mod style;
+mod table;
 mod tabs;
 mod text_edit;
 mod tool_button;
+mod tree;
 mod ui;
 pub mod widgets;
 
@@ -55,9 +57,11 @@ pub use property_grid::{PropertyGrid, PropertyGridUi, ReferenceField};
 pub use response::{FocusLost, Response};
 pub use search_field::SearchField;
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
+pub use table::{Column, SortOrder, Table, TableResponse};
 pub use tabs::{TabBar, TabBarResponse, TabLabel};
 pub use text_edit::TextEdit;
 pub use tool_button::{IconToggle, ToolButton, ToolButtonResponse};
+pub use tree::{Tree, TreeResponse};
 pub use ui::{InnerResponse, Ui};
 pub use widgets::{
     Button, Checkbox, Hyperlink, Icon, Image, Label, Numeric, ProgressBar, RadioButton,

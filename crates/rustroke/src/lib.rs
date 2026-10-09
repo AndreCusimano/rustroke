@@ -64,7 +64,8 @@
 //!   [`TextEdit`] (also for passwords), [`SearchField`], [`Hyperlink`],
 //!   [`Image`], [`Icon`], [`IconToggle`] (two-state icon, e.g. an eye),
 //!   [`ProgressBar`], [`Spinner`], [`List`] (rows to select and reorder
-//!   by dragging), [`ToolButton`] (toolbar icon with a menu of variants),
+//!   by dragging), [`Table`] (sortable, resizable columns; millions of
+//!   rows), [`Tree`] (expandable nodes), [`ToolButton`] (toolbar icon with a menu of variants),
 //!   [`PropertyGrid`] (name / value rows in collapsible sections) and
 //!   [`ReferenceField`], [`Ui::separator`]; any widget can be disabled with
 //!   [`Ui::add_enabled`]. Buttons, fields and combo boxes take their own
@@ -77,7 +78,8 @@
 //! - **Containers**: [`Panel`] (top/bottom/left/right bars), the central
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
 //!   modal dialogs ([`Modal`]), [`ScrollArea`] (vertical, horizontal or
-//!   both), popup menus with submenus ([`Ui::menu_button`]; also below any
+//!   both; [`ScrollArea::show_rows`] lays out only the visible rows,
+//!   [`Ui::scroll_to_rect`] brings something into view), popup menus with submenus ([`Ui::menu_button`]; also below any
 //!   rectangle: [`Ui::popup_below`]), context menus
 //!   ([`Response::context_menu`]), collapsible sections and trees
 //!   ([`CollapsingHeader`]), tab bars ([`TabBar`]), dockable panels
@@ -138,6 +140,7 @@
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
+//! `table`,
 //! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
@@ -160,14 +163,15 @@ pub use rustroke_text::{
 };
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
-    Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, ComboBox, Context,
-    CursorIcon, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
-    FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout,
-    List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide, ProgressBar,
-    PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle, Response, ScrollArea,
-    SearchField, SelectableLabel, Sense, Separator, Slider, Spinner, SplitAxis, Style, TabBar,
-    TabBarResponse, TabLabel, TextEdit, TextureHandle, ToolButton, ToolButtonResponse, Ui, UiRoot,
-    Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
+    Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, Column, ComboBox,
+    Context, CursorIcon, Direction, DockArea, DockNode, DockState, DockViewer, DragValue,
+    FocusLost, FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId,
+    Layout, List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide,
+    ProgressBar, PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle,
+    Response, ScrollArea, SearchField, SelectableLabel, Sense, Separator, Slider, SortOrder,
+    Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, Table, TableResponse, TextEdit,
+    TextureHandle, ToolButton, ToolButtonResponse, Tree, TreeResponse, Ui, UiRoot, Visuals, Widget,
+    WidgetDescription, WidgetInfo, WidgetRole, Window,
 };
 pub use rustroke_winit::{
     App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,

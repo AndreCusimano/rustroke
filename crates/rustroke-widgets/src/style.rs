@@ -43,6 +43,11 @@ pub struct Spacing {
     pub window_padding: f32,
     /// Width of scroll bars.
     pub scrollbar_width: f32,
+    /// Scroll bars float over the content (taking no space), thin until
+    /// hovered, and fade out shortly after scrolling stops, like on
+    /// macOS and phones. Default `false`: bars beside the content, always
+    /// visible while needed.
+    pub floating_scrollbars: bool,
     /// Horizontal shift of nested content (collapsible sections, trees).
     pub indent: f32,
 }
@@ -59,6 +64,7 @@ impl Default for Spacing {
             window_margin: 16.0,
             window_padding: 10.0,
             scrollbar_width: 8.0,
+            floating_scrollbars: false,
             indent: 18.0,
         }
     }

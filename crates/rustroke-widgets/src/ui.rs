@@ -518,6 +518,32 @@ impl<'a> Ui<'a> {
         self.row_height = 0.0;
     }
 
+    /// Scrolls the scroll areas around this Ui so `rect` (window points)
+    /// is visible, e.g. `ui.scroll_to_rect(response.rect, None)` for a
+    /// row selected with the keyboard. See [`Context::scroll_to_rect`].
+    pub fn scroll_to_rect(&mut self, rect: Rect, align: Option<Align>) {
+        self.ctx.scroll_to_rect(rect, align);
+    }
+
+    /// Moves the place of the next widget to height `y` (window points),
+    /// e.g. to skip rows that are scrolled out of view
+    /// ([`crate::ScrollArea::show_viewport`]). Top-down layouts only.
+    pub fn set_cursor_y(&mut self, y: f32) {
+        self.cursor.y = y;
+    }
+
+    /// Makes the area used by this Ui reach down to `y` (window points)
+    /// without placing anything, e.g. for rows that are scrolled out of
+    /// view.
+    pub fn extend_min_rect_to_y(&mut self, y: f32) {
+        let used = self.min_rect();
+        let left = self.max_rect.min.x;
+        self.min_rect = used.union(Rect::from_min_max(
+            Point::new(left, used.min.y.min(y)),
+            Point::new(left.max(used.max.x), y),
+        ));
+    }
+
     /// Adds empty space along the main direction.
     pub fn add_space(&mut self, amount: f32) {
         match self.layout.direction {

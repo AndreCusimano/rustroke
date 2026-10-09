@@ -505,7 +505,12 @@ struct ScrollState {
     offset: Vec2,
     /// Size of the content last frame (`None` before the first frame).
     content_size: Option<Vec2>,
+    /// When the area last scrolled (floating bars show for a while).
+    last_scroll: f64,
 }
+
+/// Seconds floating scroll bars stay visible after scrolling stops.
+const FLOATING_BAR_LINGER: f64 = 1.0;
 
 /// A scrolling area: content larger than the area is clipped and can be
 /// scrolled with the mouse wheel (Shift+wheel, or a trackpad, sideways) or
@@ -590,13 +595,66 @@ impl ScrollArea {
         ui: &mut Ui<'_>,
         add_contents: impl FnOnce(&mut Ui<'_>) -> R,
     ) -> InnerResponse<R> {
+        self.show_viewport(ui, |ui, _| add_contents(ui))
+    }
+
+    /// Shows `total_rows` rows of `row_height` points each (plus the
+    /// style's item spacing between them), but only calls `add_row` for
+    /// the visible ones: lists of millions of rows scroll as fast as short
+    /// ones. `add_rows` gets the range of row indices to add, top to
+    /// bottom, each `row_height` tall.
+    ///
+    /// ```ignore
+    /// ScrollArea::vertical().show_rows(ui, 20.0, items.len(), |ui, rows| {
+    ///     for i in rows {
+    ///         ui.label(&items[i]);
+    ///     }
+    /// });
+    /// ```
+    pub fn show_rows<R>(
+        self,
+        ui: &mut Ui<'_>,
+        row_height: f32,
+        total_rows: usize,
+        add_rows: impl FnOnce(&mut Ui<'_>, std::ops::Range<usize>) -> R,
+    ) -> InnerResponse<R> {
+        let spacing = ui.style().spacing.item_spacing.y;
+        let stride = (row_height + spacing).max(1.0);
+        self.show_viewport(ui, |ui, viewport| {
+            let first = ((viewport.min.y / stride).floor().max(0.0) as usize).min(total_rows);
+            let last = ((viewport.max.y / stride).ceil().max(0.0) as usize + 1).min(total_rows);
+            let top = ui.max_rect().min.y;
+            // Rows before the visible ones only take space.
+            ui.set_cursor_y(top + first as f32 * stride);
+            let inner = add_rows(ui, first..last);
+            // ...and so do the rows after them.
+            let height = (total_rows as f32 * stride - spacing).max(0.0);
+            ui.extend_min_rect_to_y(top + height);
+            inner
+        })
+    }
+
+    /// Shows content that only adds what is visible: `add_contents` gets
+    /// the visible part of the content, in coordinates relative to the
+    /// content's top-left corner (so `viewport.min` is the scroll offset),
+    /// and must make the content as big as all of it (e.g. by placing
+    /// widgets at their position with [`Ui::set_cursor_y`] and extending
+    /// it with [`Ui::extend_min_rect_to_y`]). Use it for rows of different
+    /// heights; [`ScrollArea::show_rows`] does this for equal rows.
+    pub fn show_viewport<R>(
+        self,
+        ui: &mut Ui<'_>,
+        add_contents: impl FnOnce(&mut Ui<'_>, Rect) -> R,
+    ) -> InnerResponse<R> {
         let id = match self.id_salt {
             Some(salt) => ui.id().with(salt),
             None => ui.next_auto_id(),
         };
         let style = ui.style();
         let bar = style.spacing.scrollbar_width;
-        let gap = 4.0;
+        let floating = style.spacing.floating_scrollbars;
+        // Floating bars take no room.
+        let gap = if floating { -bar } else { 4.0 };
         let [scroll_x, scroll_y] = self.enabled;
         let mut state: ScrollState = ui.ctx().data(id).unwrap_or_default();
         let prev_content = state.content_size;
@@ -669,21 +727,81 @@ impl ScrollArea {
         );
         let saved_clip = ui.clip_rect();
         ui.set_clip_rect(inner);
-        let content =
-            ui.scope_with_no_advance(content_max, Layout::top_down(Align::Min), add_contents);
+        let visible = Rect::from_min_size(point(state.offset.x, state.offset.y), inner.size());
+        let content = ui.scope_with_no_advance(content_max, Layout::top_down(Align::Min), |ui| {
+            add_contents(ui, visible)
+        });
         let used = content.response.rect;
-        let content_size = if used.is_empty() {
+        // A zero-width area still has a height (e.g. rows that are all
+        // scrolled out of view).
+        let content_size = if used == Rect::NOTHING {
             Vec2::ZERO
         } else {
-            used.max - origin
+            let size = used.max - origin;
+            vec2(size.x.max(0.0), size.y.max(0.0))
         };
         ui.clip_rect_restore(saved_clip);
         ui.set_clip_rect(viewport);
 
+        // Bring a requested rectangle into view (e.g. the selected row).
+        let mut offset = state.offset;
+        // The target must be in this area's content, along the axes it
+        // scrolls (content may have no width, e.g. rows drawn directly).
+        let content_rect = Rect::from_min_size(origin, content_size);
+        let overlaps = |target: Rect, axis: usize| {
+            let (a0, a1, b0, b1) = if axis == 0 {
+                (
+                    target.min.x,
+                    target.max.x,
+                    content_rect.min.x,
+                    content_rect.max.x,
+                )
+            } else {
+                (
+                    target.min.y,
+                    target.max.y,
+                    content_rect.min.y,
+                    content_rect.max.y,
+                )
+            };
+            a0 <= b1 && b0 <= a1
+        };
+        if let Some((target, align)) = ui.ctx().scroll_target()
+            && (0..2).all(|axis| !self.enabled[axis] || overlaps(target, axis))
+            && (0..2).any(|axis| self.enabled[axis])
+        {
+            for axis in 0..2 {
+                if !self.enabled[axis] {
+                    continue;
+                }
+                let get = |p: Point| if axis == 0 { p.x } else { p.y };
+                let (t0, t1) = (get(target.min), get(target.max));
+                let (v0, v1) = (get(inner.min), get(inner.max));
+                let delta = match align {
+                    Some(Align::Min) => t0 - v0,
+                    Some(Align::Center) => (t0 + t1 - v0 - v1) / 2.0,
+                    Some(Align::Max) => t1 - v1,
+                    None if t0 < v0 || t1 - t0 > v1 - v0 => t0 - v0,
+                    None if t1 > v1 => t1 - v1,
+                    None => 0.0,
+                };
+                if axis == 0 {
+                    offset.x += delta;
+                } else {
+                    offset.y += delta;
+                }
+            }
+            // Outer areas still have to bring this part of the area into
+            // view.
+            let moved = state.offset - offset;
+            let shown = Rect::from_min_max(target.min + moved, target.max + moved).intersect(inner);
+            ui.ctx()
+                .set_scroll_target((!shown.is_empty()).then_some((shown, align)));
+        }
+
         // Mouse wheel, unless a nested area already used it. A vertical
         // wheel scrolls sideways in horizontal-only areas or with Shift.
         let area = ui.interact(id.with("area"), viewport, Sense::HOVER);
-        let mut offset = state.offset;
         if area.hovered() {
             let mut delta = ui.input().scroll_delta;
             if scroll_x && (!scroll_y || ui.input().modifiers.shift) && delta.x == 0.0 {
@@ -704,7 +822,60 @@ impl ScrollArea {
             }
         }
 
-        // Scroll bars.
+        // Dragging something (a selection, a row) out of the area scrolls
+        // towards the pointer, faster the farther out it is.
+        let own_bar = [id.with("bar"), id.with("hbar")];
+        let other_active = ui.ctx().active_id().is_some_and(|a| !own_bar.contains(&a));
+        let pointer = ui.input().pointer.clone();
+        let dragging_inside = other_active
+            && pointer.primary_down()
+            && pointer.press_origin().is_some_and(|p| inner.contains(p));
+        if dragging_inside && let Some(pos) = pointer.pos() {
+            const EDGE: f32 = 16.0;
+            let dt = ui.input().dt.max(1.0 / 60.0);
+            let speed = |before: f32, after: f32| {
+                // Points per second, from how far past the edge zone it is.
+                if before > 0.0 {
+                    -before * 12.0
+                } else if after > 0.0 {
+                    after * 12.0
+                } else {
+                    0.0
+                }
+            };
+            let vy = speed(inner.min.y + EDGE - pos.y, pos.y - (inner.max.y - EDGE));
+            let vx = speed(inner.min.x + EDGE - pos.x, pos.x - (inner.max.x - EDGE));
+            let before = offset;
+            if scroll_y {
+                offset.y += vy * dt;
+            }
+            if scroll_x {
+                offset.x += vx * dt;
+            }
+            let clamped = clamp(offset, content_size);
+            if clamped != before {
+                // Keep scrolling while the pointer rests there.
+                ui.ctx().request_repaint();
+            }
+        }
+
+        // Scroll bars. Floating ones show while the area is hovered and
+        // for a moment after it scrolled.
+        let now = ui.input().time;
+        let mut last_scroll = state.last_scroll;
+        if offset != state.offset {
+            last_scroll = now;
+        }
+        let floating_alpha = floating.then(|| {
+            let since = now - last_scroll;
+            let recent = since < FLOATING_BAR_LINGER;
+            if recent && !area.hovered() {
+                ui.ctx()
+                    .request_repaint_after(FLOATING_BAR_LINGER - since + 0.01);
+            }
+            ui.ctx()
+                .animate_bool(id.with("bars"), area.hovered() || recent)
+        });
         let max_off = max_offset(content_size);
         if show_y && content_size.y > inner.height() {
             let track = Rect::from_min_max(
@@ -720,6 +891,7 @@ impl ScrollArea {
                 content_size.y,
                 offset.y,
                 max_off.y,
+                floating_alpha,
             );
         }
         if show_x && content_size.x > inner.width() {
@@ -736,6 +908,7 @@ impl ScrollArea {
                 content_size.x,
                 offset.x,
                 max_off.x,
+                floating_alpha,
             );
         }
         ui.clip_rect_restore(saved_clip);
@@ -743,6 +916,7 @@ impl ScrollArea {
         let new_state = ScrollState {
             offset: clamp(offset, content_size),
             content_size: Some(content_size),
+            last_scroll,
         };
         if new_state != state || prev_content != Some(content_size) {
             ui.ctx().insert_data(id, new_state);
@@ -758,9 +932,10 @@ impl ScrollArea {
 }
 
 /// Draws a scroll bar along `axis` (0 = x, 1 = y) in `track` and returns
-/// the offset after dragging its thumb.
+/// the offset after dragging its thumb. A floating bar (with its opacity)
+/// is thin until hovered.
 #[allow(clippy::too_many_arguments)]
-fn scroll_bar(
+pub(crate) fn scroll_bar(
     ui: &mut Ui<'_>,
     id: Id,
     track: Rect,
@@ -769,6 +944,7 @@ fn scroll_bar(
     content: f32,
     offset: f32,
     max_offset: f32,
+    floating: Option<f32>,
 ) -> f32 {
     let style = ui.style();
     let len = |v: Vec2| if axis == 0 { v.x } else { v.y };
@@ -796,12 +972,26 @@ fn scroll_bar(
     if r.dragged() && travel > 0.0 {
         offset += len(r.drag_delta()) / travel * max_offset;
     }
-    let color = if r.hovered() || r.dragged() {
+    let engaged = r.hovered() || r.dragged();
+    let mut color = if engaged {
         style.visuals.active.stroke.color
     } else {
         ui.widget_visuals(&r).bg_fill
     };
-    let radius = style.spacing.scrollbar_width / 2.0;
-    ui.painter().rect_filled(thumb, radius, color);
+    let mut drawn = thumb;
+    if let Some(alpha) = floating {
+        color = color.with_alpha(color.a * alpha.max(f32::from(u8::from(engaged))));
+        if !engaged {
+            // Thin, along the outer edge.
+            let thin = style.spacing.scrollbar_width * 0.5;
+            drawn = if axis == 0 {
+                Rect::from_min_max(point(thumb.min.x, thumb.max.y - thin), thumb.max)
+            } else {
+                Rect::from_min_max(point(thumb.max.x - thin, thumb.min.y), thumb.max)
+            };
+        }
+    }
+    let radius = drawn.width().min(drawn.height()) / 2.0;
+    ui.painter().rect_filled(drawn, radius, color);
     offset
 }

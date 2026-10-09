@@ -385,6 +385,9 @@ pub struct Context {
     open_popup: Option<Id>,
     /// Submenus open inside that popup, outermost first.
     open_submenus: Vec<Id>,
+    /// A rectangle (window points) that scroll areas should bring into
+    /// view, how to align it, and whether it was set in an earlier frame.
+    scroll_target: Option<(Rect, Option<crate::Align>, bool)>,
     /// Widget being hovered for tooltip purposes, and since when.
     hover_start: Option<(Id, f64)>,
     textures: TextureManager,
@@ -418,6 +421,7 @@ impl Default for Context {
             window_order: Vec::new(),
             open_popup: None,
             open_submenus: Vec::new(),
+            scroll_target: None,
             hover_start: None,
             textures: TextureManager::default(),
             repaint_callback: RepaintCallback(None),
@@ -654,6 +658,11 @@ impl Context {
         self.active.is_some()
     }
 
+    /// The widget being pressed or dragged, if any.
+    pub(crate) fn active_id(&self) -> Option<Id> {
+        self.active
+    }
+
     pub(crate) fn add_ui_area(&mut self, rect: Rect) {
         self.this_frame.ui_areas.push(rect);
     }
@@ -785,6 +794,15 @@ impl Context {
         if self.open_popup.is_none() {
             self.open_submenus.clear();
         }
+        // A target set after its scroll area was shown is tried once more
+        // in the next frame.
+        self.scroll_target = match self.scroll_target {
+            Some((rect, align, false)) => {
+                self.this_frame.output.repaint = true;
+                Some((rect, align, true))
+            }
+            _ => None,
+        };
         if let Some(i) = self.open_submenus.iter().position(|id| !seen.contains(id)) {
             self.open_submenus.truncate(i);
         }
@@ -1044,6 +1062,27 @@ impl Context {
             self.request_repaint();
         }
         current
+    }
+
+    // ---- Scrolling ----
+
+    /// Asks the scroll areas around `rect` (window points) to scroll so it
+    /// is visible: with `align` `None` as little as needed, otherwise with
+    /// its top/left (`Min`), center or bottom/right (`Max`) at the same
+    /// place in the visible area.
+    pub fn scroll_to_rect(&mut self, rect: Rect, align: Option<crate::Align>) {
+        self.scroll_target = Some((rect, align, false));
+    }
+
+    /// The pending scroll target, if any.
+    pub(crate) fn scroll_target(&self) -> Option<(Rect, Option<crate::Align>)> {
+        self.scroll_target.map(|(r, a, _)| (r, a))
+    }
+
+    /// Replaces the pending target (an inner scroll area handed on the
+    /// rest of the work to the outer ones) or clears it.
+    pub(crate) fn set_scroll_target(&mut self, target: Option<(Rect, Option<crate::Align>)>) {
+        self.scroll_target = target.map(|(r, a)| (r, a, false));
     }
 
     // ---- Modal dialogs ----

@@ -3086,3 +3086,396 @@ fn pointer_moves_over_empty_space_need_no_frame() {
         "app asked"
     );
 }
+
+#[test]
+fn show_rows_only_adds_the_visible_rows() {
+    let mut h = Harness::new();
+    let mut added = Vec::new();
+    let run = |h: &mut Harness, events, added: &mut Vec<usize>| {
+        added.clear();
+        h.frame(events, |ui| {
+            crate::ScrollArea::vertical().max_height(100.0).show_rows(
+                ui,
+                20.0,
+                1_000_000,
+                |ui, rows| {
+                    for i in rows {
+                        added.push(i);
+                        ui.add_sized(vec2(100.0, 20.0), crate::Label::new(format!("Row {i}")));
+                    }
+                },
+            );
+        });
+    };
+    run(&mut h, vec![], &mut added);
+    run(&mut h, vec![], &mut added);
+    assert!(added.len() < 10, "{added:?}");
+    assert_eq!(added[0], 0);
+    // Scroll far down: rows from there on, laid out where they belong.
+    run(
+        &mut h,
+        vec![move_to(point(50.0, 50.0)), scroll(-280_000.0)],
+        &mut added,
+    );
+    run(&mut h, vec![], &mut added);
+    let first = added[0];
+    assert!(
+        (9_990..=10_000).contains(&first),
+        "28 points per row: {first}"
+    );
+    let row = h.ctx.find_widget(&format!("Row {first}")).unwrap().rect;
+    assert!(row.max.y > 0.0 && row.min.y < 100.0, "visible: {row:?}");
+}
+
+#[test]
+fn scroll_to_rect_brings_a_row_into_view() {
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, target: Option<(usize, Option<crate::Align>)>| {
+        let mut rect = Rect::NOTHING;
+        let mut viewport = Rect::NOTHING;
+        h.frame(vec![], |ui| {
+            viewport = crate::ScrollArea::vertical()
+                .max_height(100.0)
+                .show(ui, |ui| {
+                    for i in 0..50 {
+                        let r = ui.add_sized(vec2(100.0, 20.0), crate::Label::new(format!("{i}")));
+                        if let Some((t, align)) = target
+                            && t == i
+                        {
+                            ui.scroll_to_rect(r.rect, align);
+                            rect = r.rect;
+                        }
+                    }
+                })
+                .response
+                .rect;
+        });
+        (rect, viewport)
+    };
+    run(&mut h, None);
+    run(&mut h, None);
+    run(&mut h, Some((30, None)));
+    let (row, viewport) = run(&mut h, Some((30, None)));
+    assert!(
+        (row.max.y - viewport.max.y).abs() < 0.5,
+        "scrolled just enough: {row:?} in {viewport:?}"
+    );
+    run(&mut h, Some((10, Some(crate::Align::Center))));
+    let (row, viewport) = run(&mut h, Some((10, Some(crate::Align::Center))));
+    assert!(
+        (row.center().y - viewport.center().y).abs() < 0.5,
+        "{row:?} {viewport:?}"
+    );
+}
+
+#[test]
+fn dragging_past_the_edge_scrolls_the_area() {
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, events| {
+        let mut first = Rect::NOTHING;
+        h.frame(events, |ui| {
+            crate::ScrollArea::vertical()
+                .max_height(100.0)
+                .show(ui, |ui| {
+                    for i in 0..50 {
+                        let r = ui.allocate_response(vec2(100.0, 20.0), crate::Sense::DRAG);
+                        if i == 0 {
+                            first = r.rect;
+                        }
+                    }
+                });
+        });
+        first
+    };
+    run(&mut h, vec![]);
+    let top = run(&mut h, vec![]);
+    let inside = top.center();
+    run(&mut h, vec![button(inside, true)]);
+    // Below the area: it scrolls down a bit every frame.
+    let below = point(inside.x, 140.0);
+    let a = run(&mut h, vec![move_to(below)]);
+    let b = run(&mut h, vec![]);
+    let c = run(&mut h, vec![]);
+    assert!(b.min.y < a.min.y && c.min.y < b.min.y, "{a:?} {b:?} {c:?}");
+    // Released: it stops.
+    run(&mut h, vec![button(below, false)]);
+    let d = run(&mut h, vec![]);
+    let e = run(&mut h, vec![]);
+    assert_eq!(d, e);
+}
+
+#[test]
+fn floating_scroll_bars_take_no_room() {
+    let width = |floating: bool| {
+        let mut h = Harness::new();
+        let mut style = crate::Style::dark();
+        style.spacing.floating_scrollbars = floating;
+        h.ctx.set_style(style);
+        let mut row = Rect::NOTHING;
+        for _ in 0..3 {
+            h.frame(vec![], |ui| {
+                crate::ScrollArea::vertical()
+                    .max_height(60.0)
+                    .show(ui, |ui| {
+                        for _ in 0..10 {
+                            row = ui.add(crate::Separator).rect;
+                        }
+                    });
+            });
+        }
+        row.width()
+    };
+    let (beside, floating) = (width(false), width(true));
+    assert!(
+        (floating - beside - 12.0).abs() < 0.5,
+        "{beside} {floating}"
+    );
+}
+
+/// A table of `rows` rows: "Name i" and a number; the first column sticky.
+fn table_frame(
+    h: &mut Harness,
+    events: Vec<Event>,
+    rows: usize,
+    selection: &mut Option<usize>,
+) -> crate::TableResponse {
+    let mut out = None;
+    h.frame(events, |ui| {
+        out = Some(
+            crate::Table::new("t")
+                .column(crate::Column::new("Name").width(150.0).sortable(true))
+                .column(
+                    crate::Column::new("Qty")
+                        .width(100.0)
+                        .align(crate::Align::Max),
+                )
+                .column(crate::Column::new("Notes").width(300.0))
+                .sticky_columns(1)
+                .max_height(150.0)
+                .show(ui, rows, selection, |ui, row, col| {
+                    match col {
+                        0 => ui.label(format!("Name {row}")),
+                        1 => ui.label(format!("{}", row * 3)),
+                        _ => ui.label("note"),
+                    };
+                }),
+        );
+    });
+    out.unwrap()
+}
+
+#[test]
+fn table_lays_out_only_visible_rows_and_sorts() {
+    let mut h = Harness::new();
+    let mut sel = None;
+    table_frame(&mut h, vec![], 1_000_000, &mut sel);
+    let t = table_frame(&mut h, vec![], 1_000_000, &mut sel);
+    assert!(t.visible_rows.len() < 10, "{:?}", t.visible_rows);
+    assert!(h.ctx.find_widget("Name 3").is_some());
+    assert!(h.ctx.find_widget("Name 500").is_none());
+
+    // Clicking a sortable header sorts ascending, then descending.
+    let header = point(SCREEN.min.x + 40.0, 14.0);
+    let t = table_frame(&mut h, click_events(header), 1_000_000, &mut sel);
+    assert!(t.sort_changed);
+    assert_eq!(
+        t.sort,
+        Some(crate::SortOrder {
+            column: 0,
+            ascending: true
+        })
+    );
+    let t = table_frame(&mut h, click_events(header), 1_000_000, &mut sel);
+    assert_eq!(t.sort.map(|s| s.ascending), Some(false));
+    let t = table_frame(&mut h, vec![], 1_000_000, &mut sel);
+    assert!(!t.sort_changed && t.sort.is_some(), "kept between frames");
+}
+
+#[test]
+fn table_selection_follows_clicks_and_keys() {
+    let mut h = Harness::new();
+    let mut sel = None;
+    table_frame(&mut h, vec![], 100, &mut sel);
+    let row2 = h.ctx.find_widget("Name 2").unwrap().rect.center();
+    let t = table_frame(&mut h, click_events(row2), 100, &mut sel);
+    assert_eq!((t.clicked_row, sel), (Some(2), Some(2)));
+    assert!(t.selection_changed);
+    // Keys move it and keep it visible.
+    for _ in 0..10 {
+        table_frame(
+            &mut h,
+            vec![key(Key::ArrowDown, Modifiers::NONE)],
+            100,
+            &mut sel,
+        );
+    }
+    assert_eq!(sel, Some(12));
+    table_frame(&mut h, vec![], 100, &mut sel);
+    assert!(
+        h.ctx.find_widget("Name 12").is_some(),
+        "scrolled to the selection"
+    );
+    table_frame(&mut h, vec![key(Key::End, Modifiers::NONE)], 100, &mut sel);
+    let t = table_frame(&mut h, vec![], 100, &mut sel);
+    assert_eq!(sel, Some(99));
+    assert!(t.visible_rows.contains(&99));
+}
+
+#[test]
+fn table_columns_resize_fit_and_stick() {
+    let mut h = Harness::new();
+    let mut sel = None;
+    table_frame(&mut h, vec![], 20, &mut sel);
+    table_frame(&mut h, vec![], 20, &mut sel);
+    let name = h.ctx.find_widget("Name 0").unwrap().rect;
+    // Drag the edge between "Name" and "Qty".
+    let edge = point(SCREEN.min.x + 150.0, 14.0);
+    table_frame(&mut h, vec![button(edge, true)], 20, &mut sel);
+    table_frame(&mut h, vec![move_to(edge + vec2(30.0, 0.0))], 20, &mut sel);
+    table_frame(
+        &mut h,
+        vec![button(edge + vec2(30.0, 0.0), false)],
+        20,
+        &mut sel,
+    );
+    table_frame(&mut h, vec![], 20, &mut sel);
+    let qty = h.ctx.find_widget("3").unwrap().rect;
+    assert!(
+        (qty.max.x - (180.0 + 100.0 - 6.0)).abs() < 1.0,
+        "right aligned in the moved column: {qty:?}"
+    );
+
+    // Double-click fits the column to its content.
+    let edge = point(SCREEN.min.x + 180.0, 14.0);
+    table_frame(&mut h, click_events(edge), 20, &mut sel);
+    table_frame(&mut h, click_events(edge), 20, &mut sel);
+    table_frame(&mut h, vec![], 20, &mut sel);
+    let qty = h.ctx.find_widget("3").unwrap().rect;
+    assert!(qty.max.x < 180.0 + 100.0 - 6.0 - 20.0, "narrower: {qty:?}");
+
+    // Scrolling sideways moves the notes but not the sticky names.
+    let inside = point(200.0, 80.0);
+    table_frame(
+        &mut h,
+        vec![move_to(inside), Event::Scroll(vec2(-100.0, 0.0))],
+        20,
+        &mut sel,
+    );
+    table_frame(&mut h, vec![], 20, &mut sel);
+    assert_eq!(h.ctx.find_widget("Name 0").unwrap().rect, name);
+}
+
+/// Roots 0, 1, 2; node n < 3 has children 100n..100n+big (leaves).
+fn tree_frame(
+    h: &mut Harness,
+    events: Vec<Event>,
+    big: u32,
+    selection: &mut Option<u32>,
+) -> crate::TreeResponse<u32> {
+    let mut out = None;
+    h.frame(events, |ui| {
+        out = Some(crate::Tree::new("tree").max_height(200.0).show(
+            ui,
+            &[0, 1, 2],
+            |n| {
+                if n < 3 {
+                    (1000 + n * big..1000 + (n + 1) * big).collect()
+                } else {
+                    Vec::new()
+                }
+            },
+            selection,
+            |ui, n| {
+                ui.label(format!("Node {n}"));
+            },
+        ));
+    });
+    out.unwrap()
+}
+
+#[test]
+fn tree_expands_with_the_arrow_and_the_keys() {
+    let mut h = Harness::new();
+    let mut sel = None;
+    tree_frame(&mut h, vec![], 3, &mut sel);
+    let t = tree_frame(&mut h, vec![], 3, &mut sel);
+    assert_eq!(t.rows.len(), 3, "closed by default");
+    // The arrow in front of "Node 1" opens it.
+    let row1 = t.rows[1].1.rect;
+    let arrow = point(row1.min.x + 6.0, row1.center().y);
+    tree_frame(&mut h, click_events(arrow), 3, &mut sel);
+    tree_frame(&mut h, vec![], 3, &mut sel);
+    let t = tree_frame(&mut h, vec![], 3, &mut sel);
+    let nodes: Vec<u32> = t.rows.iter().map(|r| r.0).collect();
+    assert_eq!(nodes, [0, 1, 1003, 1004, 1005, 2]);
+    assert!(sel.is_none(), "the arrow doesn't select");
+    let child = h.ctx.find_widget("Node 1003").unwrap().rect;
+    assert!(
+        child.min.x > h.ctx.find_widget("Node 1").unwrap().rect.min.x,
+        "indented"
+    );
+
+    // Select node 2, then → opens it and ← closes it, ← again goes up.
+    let node2 = h.ctx.find_widget("Node 2").unwrap().rect.center();
+    tree_frame(&mut h, click_events(node2), 3, &mut sel);
+    assert_eq!(sel, Some(2));
+    tree_frame(
+        &mut h,
+        vec![key(Key::ArrowRight, Modifiers::NONE)],
+        3,
+        &mut sel,
+    );
+    let t = tree_frame(
+        &mut h,
+        vec![key(Key::ArrowRight, Modifiers::NONE)],
+        3,
+        &mut sel,
+    );
+    assert_eq!(sel, Some(1006), "→ on an open node goes to its first child");
+    assert_eq!(t.rows.len(), 9);
+    tree_frame(
+        &mut h,
+        vec![key(Key::ArrowLeft, Modifiers::NONE)],
+        3,
+        &mut sel,
+    );
+    assert_eq!(sel, Some(2), "← on a leaf goes to the parent");
+    tree_frame(
+        &mut h,
+        vec![key(Key::ArrowLeft, Modifiers::NONE)],
+        3,
+        &mut sel,
+    );
+    let t = tree_frame(&mut h, vec![], 3, &mut sel);
+    assert_eq!(t.rows.len(), 6, "← closes it");
+}
+
+#[test]
+fn tree_lays_out_only_visible_rows() {
+    let mut h = Harness::new();
+    let mut sel = None;
+    tree_frame(&mut h, vec![], 100_000, &mut sel);
+    let t = tree_frame(&mut h, vec![], 100_000, &mut sel);
+    let row0 = t.rows[0].1.rect;
+    let arrow = point(row0.min.x + 6.0, row0.center().y);
+    tree_frame(&mut h, click_events(arrow), 100_000, &mut sel);
+    let t = tree_frame(&mut h, vec![], 100_000, &mut sel);
+    assert!(t.rows.len() < 15, "{}", t.rows.len());
+    // End selects the last node and scrolls to it.
+    let node0 = h.ctx.find_widget("Node 0").unwrap().rect.center();
+    tree_frame(&mut h, click_events(node0), 100_000, &mut sel);
+    tree_frame(
+        &mut h,
+        vec![key(Key::End, Modifiers::NONE)],
+        100_000,
+        &mut sel,
+    );
+    assert_eq!(sel, Some(2));
+    tree_frame(&mut h, vec![], 100_000, &mut sel);
+    let t = tree_frame(&mut h, vec![], 100_000, &mut sel);
+    let nodes: Vec<u32> = t.rows.iter().map(|r| r.0).collect();
+    assert!(
+        h.ctx.find_widget("Node 2").is_some(),
+        "scrolled to the end: {nodes:?}"
+    );
+}

@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-09
+
+### Added
+
+- **Virtual scrolling**: `ScrollArea::show_rows(ui, row_height, total,
+  |ui, range| ..)` only adds the visible rows (a million rows scroll like
+  ten); `ScrollArea::show_viewport(ui, |ui, visible| ..)` for rows of
+  different heights, with `Ui::set_cursor_y` and
+  `Ui::extend_min_rect_to_y`.
+- **Scrolling to something**: `Ui::scroll_to_rect(rect, align)` /
+  `Context::scroll_to_rect` scroll the areas around `rect` so it is
+  visible (as little as needed, or aligned to the top, center or bottom);
+  nested areas all follow.
+- **Autoscroll**: dragging something (a text selection, a list row) past
+  the edge of a scroll area scrolls it, faster the farther out.
+- **Tables**: `Table::new(id).column(Column::new("Name").width(..)
+  .sortable(true).align(..)).show(ui, rows, &mut selection, |ui, row,
+  col| ..)`: a header that stays at the top, columns resized by dragging
+  the header's edge (double-click fits the content), sorting by clicking
+  a header (`TableResponse::sort`, the app sorts its rows), the first
+  columns fixed while the others scroll sideways (`sticky_columns`),
+  striped rows, selection with clicks and arrow / Page / Home / End keys
+  (kept visible), double-clicked rows, and only the visible rows laid
+  out. `show_with_heights` takes a height per row, e.g. for expanded
+  rows. New `table` example with 100 000 parts.
+- **Trees**: `Tree::new(id).show(ui, &roots, |node| children, &mut
+  selection, |ui, node| ..)` for nodes that are small `Copy` ids: open
+  and close with the arrow, a double-click or →/←, select with clicks and
+  the arrow keys (← goes to the parent, → to the first child), only the
+  visible rows laid out. `default_open_depth`, `max_height`, `row_height`.
+  The `table` example has a tree of 100 000 nodes.
+- **Floating scroll bars** (`Spacing::floating_scrollbars`): over the
+  content, thin until hovered, fading out a second after scrolling.
+
 ## [0.9.0] — 2026-10-09
 
 ### Added
@@ -354,7 +388,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/AndreCusimano/rustroke/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/AndreCusimano/rustroke/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/AndreCusimano/rustroke/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/AndreCusimano/rustroke/compare/v0.6.0...v0.7.0

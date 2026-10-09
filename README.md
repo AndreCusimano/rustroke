@@ -83,7 +83,9 @@ fn main() -> Result<(), rustroke::RunError> {
 
 - **Widgets**: labels, buttons, checkboxes, radio buttons, selectable labels,
   sliders, drag values (drag or type a number), combo boxes, progress bars,
-  spinners, lists that can be selected and reordered by dragging, single and
+  spinners, lists that can be selected and reordered by dragging, tables
+  (sortable and resizable columns, sticky columns, millions of rows) and
+  trees that only lay out their visible rows, single and
   multi-line text fields (selection, double/triple click, clipboard, undo,
   word navigation, input methods for accented and Asian text, passwords),
   search fields, links, images (also with rounded corners), SVG icons,
@@ -150,6 +152,7 @@ cargo run -p rustroke --example custom_wgpu # your own shader inside the UI (pai
 cargo run -p rustroke --example integration # the UI inside your own winit loop and wgpu device
 cargo run -p rustroke --example layout      # rows, alignment, wrapping, grids
 cargo run -p rustroke --example containers  # menus, panels, windows, scroll areas, tooltips
+cargo run -p rustroke --example table       # 100 000-row table and a large tree
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
 cargo run -p rustroke --example themes      # live theme editor
 cargo run -p rustroke --example extras      # images, disabled widgets, accessibility
