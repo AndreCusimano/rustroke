@@ -37,6 +37,9 @@ pub struct Response {
     pub(crate) clicked_by: Option<PointerButton>,
     pub(crate) drag_button: Option<PointerButton>,
     pub(crate) interact_pos: Option<Point>,
+    /// On the frame the primary button was pressed on the widget: how many
+    /// presses in a row (2 = double click).
+    pub(crate) press_count: u32,
 }
 
 impl Response {
@@ -59,6 +62,7 @@ impl Response {
             clicked_by: None,
             drag_button: None,
             interact_pos: None,
+            press_count: 0,
         }
     }
 
@@ -75,6 +79,18 @@ impl Response {
     /// Clicked with the pointer, or activated with Enter/Space while focused.
     pub fn clicked(&self) -> bool {
         self.clicked
+    }
+
+    /// The primary button was pressed on the widget for the second time in
+    /// a row (reported on that press, not on the release).
+    pub fn double_clicked(&self) -> bool {
+        self.press_count == 2
+    }
+
+    /// The primary button was pressed on the widget for the third time in
+    /// a row (reported on that press).
+    pub fn triple_clicked(&self) -> bool {
+        self.press_count == 3
     }
 
     /// Clicked with the secondary (usually right) mouse button, e.g. to

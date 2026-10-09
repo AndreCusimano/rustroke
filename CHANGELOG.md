@@ -6,6 +6,77 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-09
+
+### Added
+
+- **Closing from the app**: `Frame::close()` closes the window without
+  asking `App::on_close_requested` (e.g. after a "save changes?" dialog);
+  `Frame::close_requested()`, `RunOutput::close` for `Integration` and
+  `Harness::close_requested()` for tests.
+- **Unified title bar** (macOS): `WindowOptions::unified_titlebar` makes
+  the title bar transparent with the content under it, so the app draws
+  its menu bar next to the window buttons; `Frame::titlebar_height()`
+  tells how much space it takes (28 points, 0 elsewhere). The
+  `containers` example uses it.
+- **Modal dialogs**: `Modal::new(id).title(..).width(..).show(frame, |ui|
+  ..)` draws a centered card over a veil that blocks every click below;
+  Tab only moves between the dialog's widgets, focus behind it is
+  removed, and Escape (or, with `close_on_click_outside`, a click on the
+  veil) sets `ModalResponse::should_close`. `Context::is_modal_open()`
+  tells the app to ignore shortcuts. New layer order `Order::Modal`
+  (between windows and popups) and `Visuals::modal_backdrop`.
+- **Per-widget style**: `.fill(..)`, `.stroke(..)`, `.corner_radius(..)`
+  and `.min_size(..)` on `Button`, `TextEdit`, `ComboBox` and
+  `ToolButton`, without changing the global `Style`. `min_size` replaces
+  the style's `interact_height` as the minimum height, so it can also
+  make a widget smaller (e.g. 22-point fields); `TextEdit::margin(..)`
+  sets the space around the text.
+- **Search fields**: `SearchField::new(&mut text)` with a magnifying
+  glass, a hint ("Search…") and a × that clears the text (`changed()` is
+  true then, and the field keeps focus).
+- **Two-state icon buttons**: `IconToggle::new(&mut on, on_icon,
+  off_icon, label)`, frameless, with a tooltip and announced as a
+  checkbox (e.g. eye open / closed in a tree).
+- **Submenus**: `ui.menu_button(..)` inside a menu is an item with a ▸
+  that opens a submenu to its right on hover or click; hovering another
+  item closes it, Escape closes only the innermost submenu, and choosing
+  an item closes the whole menu.
+- **Text fields**: `TextEdit::password(true)` shows • for every
+  character (copying is disabled, screen readers get the masked text);
+  double-click selects a word and triple-click a line, and dragging
+  afterwards extends the selection by whole words or lines.
+- **Multiple clicks**: `PointerState::click_count()` and
+  `Response::double_clicked()` / `triple_clicked()` (reported on the
+  press).
+- **Links**: `Hyperlink::new(url)`, `Hyperlink::from_label_and_url(..)`,
+  `Hyperlink::action(text)` and `ui.hyperlink(..)` / `ui.hyperlink_to(..)`:
+  accent-colored text, underlined on hover, with a pointing-hand cursor.
+  Clicking calls `Context::open_url`, which sets `FrameOutput::open_url`;
+  rustroke-winit opens it in the browser. New role `WidgetRole::Link`.
+- **Window height**: dragging a `Window`'s corner now changes its
+  height too; from then on (or with `Window::default_height`) content
+  that doesn't fit is clipped and a `ScrollArea` inside fills the height.
+- `Context::pointer_move_needs_frame(pos)` and
+  `Context::request_pointer_moves()` (see Changed).
+- The `lists` example filters its features with a search field, uses eye
+  toggles, and shows a feature timeline with a draggable rollback marker
+  built from `ui.interact`, the painter and tooltips on free areas.
+
+### Changed
+
+- **Fewer redraws**: moving the pointer over empty space or plain text
+  no longer draws a frame; moves still do over interactive widgets and
+  widgets with tooltips, when the hovered widget changes and while
+  dragging. Apps that draw something following the pointer elsewhere
+  call `ctx.request_pointer_moves()` every frame. Consecutive pointer
+  moves between frames are merged into one event.
+- `WindowOptions` has a new field, `unified_titlebar`: struct literals
+  need `..Default::default()`.
+- `Order` has a new variant, `Modal`, and `Visuals` a new field,
+  `modal_backdrop`. `FrameOutput` has a new field, `open_url`, and
+  `WidgetRole` a new variant, `Link`.
+
 ## [0.8.0] — 2026-10-09
 
 ### Added
@@ -283,7 +354,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/AndreCusimano/rustroke/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/AndreCusimano/rustroke/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/AndreCusimano/rustroke/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AndreCusimano/rustroke/compare/v0.5.0...v0.6.0

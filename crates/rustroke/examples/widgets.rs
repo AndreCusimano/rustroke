@@ -101,6 +101,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "widgets".to_owned(),
             inner_size: (520.0, 720.0),
+            ..Default::default()
         },
         Demo::default(),
     )

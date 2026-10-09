@@ -113,6 +113,26 @@ pub(crate) fn show_popup<R>(
     show_floating(ui, floating, add_contents)
 }
 
+/// Shows the submenu belonging to menu item `owner` with its top-left
+/// corner at `pos`.
+pub(crate) fn show_submenu<R>(
+    ui: &mut Ui<'_>,
+    owner: Id,
+    pos: Point,
+    add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+) -> R {
+    let layer = popup_layer(owner);
+    let floating = Floating {
+        layer,
+        id: layer.id,
+        pos,
+        max_width: 220.0,
+        min_width: 0.0,
+        interactive: true,
+    };
+    show_floating(ui, floating, add_contents)
+}
+
 impl Ui<'_> {
     /// Shows the popup `id` below `anchor` while it is open (see
     /// [`crate::Context::toggle_popup`]), e.g. a menu opened by a button
@@ -195,6 +215,8 @@ impl Response {
     /// Shows `text` in a tooltip when the widget has been hovered for a
     /// moment.
     pub fn on_hover_text(self, ui: &mut Ui<'_>, text: impl Into<String>) -> Self {
+        let visible = self.rect.intersect(ui.clip_rect());
+        ui.ctx().add_tooltip_area(visible);
         let hovered_for = ui.ctx().hover_duration(self.id, self.hovered());
         if !self.hovered() || self.is_pressed() {
             return self;

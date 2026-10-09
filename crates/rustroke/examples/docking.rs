@@ -147,6 +147,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "Rustroke — docking".into(),
             inner_size: (1000.0, 640.0),
+            ..Default::default()
         },
         Demo {
             documents: vec![

@@ -1,10 +1,12 @@
 //! Phase 5 demo: containers. A menu bar, a resizable side panel with a
 //! scrolling list, a status bar, floating windows (drag the title, resize
-//! from the corner, close with ×) and tooltips.
+//! from the corner, close with ×), tooltips and a modal dialog
+//! (File › Quit). On macOS the menu bar sits in a unified title bar,
+//! next to the window buttons.
 //!
 //! Run with: `cargo run -p rustroke --example containers`
 
-use rustroke::{App, CentralPanel, Frame, Panel, ScrollArea, Slider, WindowOptions, point};
+use rustroke::{App, CentralPanel, Frame, Modal, Panel, ScrollArea, Slider, WindowOptions, point};
 
 struct Demo {
     selected: usize,
@@ -13,14 +15,21 @@ struct Demo {
     zoom: f32,
     grid: bool,
     status: String,
+    confirm_quit: bool,
 }
 
 impl App for Demo {
     fn update(&mut self, frame: &mut Frame) {
         frame.clear_color = frame.ctx().style().visuals.background;
 
+        // With a unified title bar (macOS) the menu bar shares the top
+        // strip with the window buttons.
+        let titlebar = frame.titlebar_height();
         Panel::top("menu").show(frame, |ui| {
             ui.horizontal(|ui| {
+                if titlebar > 0.0 {
+                    ui.add_space(70.0);
+                }
                 ui.menu_button("File", |ui| {
                     if ui.button("New").clicked() {
                         self.status = "File › New".into();
@@ -28,9 +37,16 @@ impl App for Demo {
                     if ui.button("Open…").clicked() {
                         self.status = "File › Open".into();
                     }
+                    ui.menu_button("Open recent", |ui| {
+                        for name in ["bracket.cad", "gearbox.cad", "housing.cad"] {
+                            if ui.button(name).clicked() {
+                                self.status = format!("File › Open recent › {name}");
+                            }
+                        }
+                    });
                     ui.separator();
                     if ui.button("Quit").clicked() {
-                        self.status = "File › Quit (not implemented)".into();
+                        self.confirm_quit = true;
                     }
                 });
                 ui.menu_button("View", |ui| {
@@ -103,7 +119,24 @@ impl App for Demo {
             .default_width(260.0)
             .show(frame, |ui| {
                 ui.label("Rustroke — an immediate-mode GUI library for Rust. Windows, panels, menus and tooltips.");
+                ui.hyperlink_to("rustroke on crates.io", "https://crates.io/crates/rustroke");
             });
+
+        // A modal dialog: everything else is blocked until it is answered.
+        if self.confirm_quit {
+            let dialog = Modal::new("quit").title("Quit?").show(frame, |ui| {
+                ui.label("Unsaved screens will be lost.");
+                ui.horizontal(|ui| (ui.button("Quit").clicked(), ui.button("Cancel").clicked()))
+                    .inner
+            });
+            let (quit, cancel) = dialog.inner;
+            if quit {
+                frame.close();
+            }
+            if cancel || dialog.should_close {
+                self.confirm_quit = false;
+            }
+        }
     }
 }
 
@@ -113,6 +146,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "containers".to_owned(),
             inner_size: (900.0, 600.0),
+            unified_titlebar: true,
         },
         Demo {
             selected: 0,
@@ -121,6 +155,7 @@ fn main() -> Result<(), rustroke::RunError> {
             zoom: 100.0,
             grid: true,
             status: "Ready".into(),
+            confirm_quit: false,
         },
     )
 }

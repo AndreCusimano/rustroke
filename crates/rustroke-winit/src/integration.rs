@@ -35,6 +35,8 @@ pub struct RunOutput {
     pub repaint: bool,
     /// Draw another frame after this delay (e.g. to show a tooltip).
     pub repaint_after: Option<Duration>,
+    /// The UI called [`Frame::close`]: close the window.
+    pub close: bool,
 }
 
 /// The UI of an application that drives winit and wgpu itself. Per
@@ -158,7 +160,10 @@ impl Integration {
             WindowEvent::Resized(_)
             | WindowEvent::ScaleFactorChanged { .. }
             | WindowEvent::Occluded(false) => true,
-            event => self.input.on_window_event(event, scale_factor),
+            event => {
+                self.input.on_window_event(event, scale_factor)
+                    && crate::needs_frame(event, &self.ctx, &self.input)
+            }
         };
         let consumed = match event {
             WindowEvent::CursorMoved { .. }
@@ -218,12 +223,15 @@ impl Integration {
             title: None,
             windows: Vec::new(),
             window_id: None,
+            close: false,
+            titlebar_height: 0.0,
         };
         add(&mut frame);
         let Frame {
             mut shapes,
             request_repaint,
             title,
+            close,
             ..
         } = frame;
         if title.is_some() {
@@ -235,6 +243,9 @@ impl Integration {
         if let Some(text) = output.copied_text.take() {
             self.input.set_clipboard_text(text);
         }
+        if let Some(url) = output.open_url.take() {
+            crate::open_url(&url);
+        }
         self.textures.set.append(&mut output.textures.set);
         self.textures.free.append(&mut output.textures.free);
         self.meshes = Tessellator::new(pixels_per_point, self.fonts.atlas()).tessellate(&shapes);
@@ -244,6 +255,7 @@ impl Integration {
         RunOutput {
             repaint: request_repaint || output.repaint,
             repaint_after: output.repaint_after.map(Duration::from_secs_f64),
+            close,
         }
     }
 
@@ -351,7 +363,11 @@ mod tests {
         show(&mut ui);
 
         let over_panel = ui.on_window_event_scaled(&moved(20.0, 50.0), 1.0);
-        assert!(over_panel.consumed && over_panel.repaint);
+        assert!(over_panel.consumed);
+        assert!(!over_panel.repaint, "nothing to update over empty space");
+        let tool = ui.ctx.find_widget("Tool").expect("button").rect.center();
+        let over_button = ui.on_window_event_scaled(&moved(tool.x.into(), tool.y.into()), 1.0);
+        assert!(over_button.consumed && over_button.repaint, "hover starts");
         let over_scene = ui.on_window_event_scaled(&moved(150.0, 50.0), 1.0);
         assert!(!over_scene.consumed, "the app's 3D view gets it");
         show(&mut ui);

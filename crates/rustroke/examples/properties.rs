@@ -242,6 +242,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "Rustroke — properties".into(),
             inner_size: (960.0, 620.0),
+            ..Default::default()
         },
         Demo {
             features: vec![

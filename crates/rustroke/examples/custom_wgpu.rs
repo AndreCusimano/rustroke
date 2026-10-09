@@ -140,6 +140,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "Rustroke — custom wgpu drawing".into(),
             inner_size: (640.0, 480.0),
+            ..Default::default()
         },
         Demo {
             gpu: None,

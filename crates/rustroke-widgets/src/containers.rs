@@ -272,13 +272,18 @@ impl CentralPanel {
 struct WindowState {
     pos: Point,
     width: f32,
+    /// Height chosen by resizing (or [`Window::default_height`]); `None`
+    /// follows the content.
+    height: Option<f32>,
     /// Size of the content in the previous frame.
     content_size: Vec2,
 }
 
 /// A floating window with a title bar: drag the title to move it, click
-/// it to bring it to the front, drag the bottom-right corner to change
-/// its width. Its height follows the content.
+/// it to bring it to the front, drag the bottom-right corner to resize
+/// it. Its height follows the content until it is resized (or given a
+/// [`Window::default_height`]); then content that doesn't fit is clipped,
+/// so put long content in a [`ScrollArea`], which fills the height.
 #[derive(Debug)]
 pub struct Window<'open> {
     title: String,
@@ -286,6 +291,7 @@ pub struct Window<'open> {
     open: Option<&'open mut bool>,
     default_pos: Option<Point>,
     default_width: f32,
+    default_height: Option<f32>,
     resizable: bool,
 }
 
@@ -300,6 +306,7 @@ impl<'open> Window<'open> {
             open: None,
             default_pos: None,
             default_width: 280.0,
+            default_height: None,
             resizable: true,
         }
     }
@@ -329,7 +336,14 @@ impl<'open> Window<'open> {
         self
     }
 
-    /// Whether the width can be changed by dragging the bottom-right corner.
+    /// Height when first shown, in points (title bar included). Without
+    /// it the window is as tall as its content until resized.
+    pub fn default_height(mut self, height: f32) -> Self {
+        self.default_height = Some(height);
+        self
+    }
+
+    /// Whether the size can be changed by dragging the bottom-right corner.
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
         self
@@ -354,6 +368,7 @@ impl<'open> Window<'open> {
         let mut state: WindowState = ctx.data(self.id).unwrap_or(WindowState {
             pos: self.default_pos.unwrap_or(point(60.0, 60.0)),
             width: self.default_width,
+            height: self.default_height,
             content_size: Vec2::ZERO,
         });
         // Keep the title bar reachable.
@@ -362,7 +377,12 @@ impl<'open> Window<'open> {
             .x
             .clamp(screen.min.x - state.width + 60.0, screen.max.x - 60.0);
         state.pos.y = state.pos.y.clamp(screen.min.y, screen.max.y - title_height);
-        let height = title_height + state.content_size.y + 2.0 * pad;
+        let min_height = title_height + 2.0 * pad + 20.0;
+        let height = state
+            .height
+            .map_or(title_height + state.content_size.y + 2.0 * pad, |h| {
+                h.max(min_height)
+            });
         let rect = Rect::from_min_size(state.pos, vec2(state.width, height));
 
         let layer = LayerId::new(Order::Middle, self.id);
@@ -421,9 +441,15 @@ impl<'open> Window<'open> {
 
             // Content.
             ui.set_clip_rect(rect);
+            // With a fixed height the content gets exactly the space left,
+            // so scroll areas fill it.
+            let bottom = match state.height {
+                Some(_) => rect.max.y - pad,
+                None => screen.max.y.max(rect.max.y),
+            };
             let content_max = Rect::from_min_max(
                 point(rect.min.x + pad, title_rect.max.y + pad),
-                point(rect.max.x - pad, screen.max.y.max(rect.max.y)),
+                point(rect.max.x - pad, bottom),
             );
             let content = ui.scope_with(content_max, Layout::top_down(Align::Min), add_contents);
 
@@ -433,6 +459,7 @@ impl<'open> Window<'open> {
                 }
                 if r.dragged() {
                     state.width = (state.width + r.drag_delta().x).max(120.0);
+                    state.height = Some((height + r.drag_delta().y).max(min_height));
                 }
                 let color = if r.hovered() || r.dragged() {
                     visuals.accent

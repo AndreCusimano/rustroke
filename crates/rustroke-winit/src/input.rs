@@ -50,7 +50,12 @@ impl InputCollector {
             WindowEvent::CursorMoved { position, .. } => {
                 let pos = to_points(position.x, position.y);
                 self.pointer = Some(pos);
-                self.events.push(Event::PointerMoved(pos));
+                // Only the latest of consecutive moves matters.
+                if let Some(Event::PointerMoved(last)) = self.events.last_mut() {
+                    *last = pos;
+                } else {
+                    self.events.push(Event::PointerMoved(pos));
+                }
             }
             WindowEvent::CursorLeft { .. } => {
                 self.pointer = None;

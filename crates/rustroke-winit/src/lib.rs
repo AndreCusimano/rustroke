@@ -38,6 +38,11 @@ pub struct WindowOptions {
     pub title: String,
     /// Initial inner size in logical (DPI-independent) points.
     pub inner_size: (f64, f64),
+    /// On macOS, a transparent title bar with the content extending under
+    /// it: the app draws its own top bar (menus, document name) next to
+    /// the window buttons, leaving the first [`Frame::titlebar_height`]
+    /// points free of widgets on the left. Elsewhere it has no effect.
+    pub unified_titlebar: bool,
 }
 
 impl Default for WindowOptions {
@@ -45,9 +50,14 @@ impl Default for WindowOptions {
         Self {
             title: "rustroke app".to_owned(),
             inner_size: (800.0, 600.0),
+            unified_titlebar: false,
         }
     }
 }
+
+/// Height of the macOS title bar in points, which a unified title bar
+/// overlaps.
+const MACOS_TITLEBAR_HEIGHT: f32 = 28.0;
 
 /// Per-frame information and output, passed to [`App::update`].
 #[derive(Debug)]
@@ -75,6 +85,10 @@ pub struct Frame<'a> {
     windows: Vec<(Id, WindowOptions)>,
     /// Which window this frame is for (`None`: the main window).
     window_id: Option<Id>,
+    /// [`Frame::close`] was called.
+    close: bool,
+    /// Height of the title bar drawn over the content, in points.
+    titlebar_height: f32,
 }
 
 impl Frame<'_> {
@@ -88,6 +102,28 @@ impl Frame<'_> {
         if !self.windows.iter().any(|(w, _)| *w == id) {
             self.windows.push((id, options));
         }
+    }
+
+    /// Closes the window this frame is drawn for, without asking
+    /// [`App::on_close_requested`] (e.g. once the user has answered a
+    /// "save changes?" dialog). Closing the main window ends [`run`]; for
+    /// an extra window, also stop calling [`Frame::show_window`] for it, or
+    /// it opens again.
+    pub fn close(&mut self) {
+        self.close = true;
+    }
+
+    /// Height of the title bar overlapping the top of the window, in
+    /// points: 28 on macOS with [`WindowOptions::unified_titlebar`], else 0.
+    /// The window buttons sit in its left part (about 70 points wide);
+    /// dragging an empty part of it moves the window.
+    pub fn titlebar_height(&self) -> f32 {
+        self.titlebar_height
+    }
+
+    /// Whether [`Frame::close`] was called this frame.
+    pub fn close_requested(&self) -> bool {
+        self.close
     }
 
     /// The extra window this frame is drawn for (`None`: the main window).
@@ -361,6 +397,8 @@ struct WindowState {
     ime_allowed: bool,
     /// Kept between frames to reuse its allocation.
     shapes: DisplayList,
+    /// See [`Frame::titlebar_height`].
+    titlebar_height: f32,
 }
 
 impl WindowState {
@@ -376,6 +414,19 @@ impl WindowState {
             .with_title(&options.title)
             .with_inner_size(LogicalSize::new(w, h))
             .with_visible(false);
+        #[cfg(target_os = "macos")]
+        let attributes = {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attributes
+                .with_titlebar_transparent(options.unified_titlebar)
+                .with_title_hidden(options.unified_titlebar)
+                .with_fullsize_content_view(options.unified_titlebar)
+        };
+        let titlebar_height = if cfg!(target_os = "macos") && options.unified_titlebar {
+            MACOS_TITLEBAR_HEIGHT
+        } else {
+            0.0
+        };
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
@@ -409,19 +460,21 @@ impl WindowState {
             repaint_at: None,
             ime_allowed: false,
             shapes: DisplayList::new(),
+            titlebar_height,
         })
     }
 
     /// Runs one frame: `update` describes the UI, then it is drawn.
-    /// Returns the windows the frame asked for, and whether it handled
-    /// input (which may have changed state other windows show).
+    /// Returns the windows the frame asked for, whether it handled input
+    /// (which may have changed state other windows show) and whether the
+    /// app closed the window.
     fn redraw(
         &mut self,
         fonts: &mut Fonts,
         start: Instant,
         window_id: Option<Id>,
         update: impl FnOnce(&mut Frame<'_>),
-    ) -> (Vec<(Id, WindowOptions)>, bool) {
+    ) -> (Vec<(Id, WindowOptions)>, bool, bool) {
         // Window scale factors are small values like 1.0, 1.5 or 2.0.
         #[allow(clippy::cast_possible_truncation)]
         let pixels_per_point = self.window.scale_factor() as f32;
@@ -457,6 +510,8 @@ impl WindowState {
             title: None,
             windows: Vec::new(),
             window_id,
+            close: false,
+            titlebar_height: self.titlebar_height,
         };
         update(&mut frame);
         let Frame {
@@ -465,6 +520,7 @@ impl WindowState {
             request_repaint,
             title,
             windows,
+            close,
             ..
         } = frame;
         if let Some(title) = title
@@ -486,6 +542,9 @@ impl WindowState {
             .map(|secs| Instant::now() + Duration::from_secs_f64(secs));
         if let Some(text) = output.copied_text.take() {
             self.input.set_clipboard_text(text);
+        }
+        if let Some(url) = output.open_url.take() {
+            open_url(&url);
         }
         if output.ime_cursor.is_some() != self.ime_allowed {
             self.ime_allowed = output.ime_cursor.is_some();
@@ -516,7 +575,7 @@ impl WindowState {
         if outcome == RenderOutcome::Retry || request_repaint || output.repaint {
             self.window.request_redraw();
         }
-        (windows, had_input)
+        (windows, had_input, close)
     }
 
     fn on_accesskit(&mut self, event: accesskit_winit::WindowEvent) {
@@ -567,7 +626,12 @@ impl<A: App> Runner<A> {
         } = self;
         let had_input;
         if let Some(main) = self.main.as_mut().filter(|m| m.window.id() == window) {
-            let (requested, input) = main.redraw(fonts, *start, None, |frame| app.update(frame));
+            let (requested, input, close) =
+                main.redraw(fonts, *start, None, |frame| app.update(frame));
+            if close {
+                event_loop.exit();
+                return;
+            }
             had_input = input;
             let changed = requested
                 .iter()
@@ -587,11 +651,18 @@ impl<A: App> Runner<A> {
             .find(|(_, s)| s.window.id() == window)
         {
             let id = *id;
-            had_input = state
-                .redraw(fonts, *start, Some(id), |frame| {
-                    app.update_window(id, frame)
-                })
-                .1;
+            let close;
+            (_, had_input, close) = state.redraw(fonts, *start, Some(id), |frame| {
+                app.update_window(id, frame);
+            });
+            if close {
+                self.extras.retain(|(k, _)| *k != id);
+                self.requested.retain(|(k, _)| *k != id);
+                if let Some(main) = &self.main {
+                    main.window.request_redraw();
+                }
+                return;
+            }
         } else {
             return;
         }
@@ -712,11 +783,39 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
                 if state
                     .input
                     .on_window_event(&event, state.window.scale_factor())
+                    && needs_frame(&event, &state.ctx, &state.input)
                 {
                     state.window.request_redraw();
                 }
             }
         }
+    }
+}
+
+/// Whether input `event` (already collected) needs a new frame: pointer
+/// moves only do when they can change what is shown.
+pub(crate) fn needs_frame(event: &WindowEvent, ctx: &Context, input: &InputCollector) -> bool {
+    match event {
+        WindowEvent::CursorMoved { .. } => input
+            .pointer()
+            .is_none_or(|pos| ctx.pointer_move_needs_frame(pos)),
+        _ => true,
+    }
+}
+
+/// Opens `url` with the platform's default handler (the browser for web
+/// links), without waiting for it.
+pub(crate) fn open_url(url: &str) {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let result = std::process::Command::new("xdg-open").arg(url).spawn();
+    if let Err(e) = result {
+        log::warn!("could not open {url}: {e}");
     }
 }
 

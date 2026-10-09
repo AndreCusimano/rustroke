@@ -134,6 +134,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "shapes".to_owned(),
             inner_size: (950.0, 400.0),
+            ..Default::default()
         },
         Shapes,
     )

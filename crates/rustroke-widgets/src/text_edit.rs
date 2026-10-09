@@ -1,7 +1,10 @@
 //! Editable text fields.
 
-use rustroke_core::{Event, Galley, ImeEvent, Key, Modifiers, Point, Rect, Stroke, point, vec2};
+use rustroke_core::{
+    Color, Event, Galley, ImeEvent, Key, Modifiers, Point, Rect, Stroke, Vec2, point, vec2,
+};
 
+use crate::widgets::{FrameOverride, frame_setters};
 use crate::{CursorIcon, FocusLost, Id, Response, Sense, Ui, Widget, WidgetInfo, WidgetRole};
 
 /// Seconds the text cursor stays visible, then hidden, while blinking.
@@ -25,6 +28,102 @@ struct TextEditState {
     /// The text when the field got focus, restored by Escape. `None`
     /// while the field is not focused.
     original: Option<String>,
+    /// After a double (words) or triple (lines) click: the unit and the
+    /// range first selected, which dragging extends by whole units.
+    unit_selection: Option<(SelectUnit, usize, usize)>,
+}
+
+/// The character shown for every character of a password.
+const PASSWORD_CHAR: char = '•';
+
+/// `text` with every character replaced by [`PASSWORD_CHAR`].
+fn mask(text: &str) -> String {
+    text.chars().map(|_| PASSWORD_CHAR).collect()
+}
+
+/// Lays out the field's text. For passwords the galley shows • for every
+/// character, with its cursor positions mapped back to byte indices of
+/// the real text, so editing works on the real text unchanged.
+fn layout_field(
+    ui: &mut Ui<'_>,
+    text: &str,
+    style: &rustroke_text::TextStyle,
+    wrap: Option<f32>,
+    password: bool,
+) -> std::sync::Arc<Galley> {
+    if !password {
+        return ui.layout_text(text, style, wrap);
+    }
+    let masked = ui.layout_text(&mask(text), style, wrap);
+    let starts: Vec<usize> = text
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain([text.len()])
+        .collect();
+    let mut galley = (*masked).clone();
+    for row in &mut galley.rows {
+        for caret in &mut row.carets {
+            let n = caret.0 / PASSWORD_CHAR.len_utf8();
+            caret.0 = starts.get(n).copied().unwrap_or(text.len());
+        }
+    }
+    std::sync::Arc::new(galley)
+}
+
+/// What a multiple click selects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SelectUnit {
+    #[default]
+    Word,
+    Line,
+}
+
+impl SelectUnit {
+    /// The word or line around byte `index` of `text`.
+    fn range(self, text: &str, index: usize) -> (usize, usize) {
+        match self {
+            Self::Word => word_range(text, index),
+            Self::Line => {
+                let start = text[..index].rfind('\n').map_or(0, |i| i + 1);
+                let end = text[index..].find('\n').map_or(text.len(), |i| index + i);
+                (start, end)
+            }
+        }
+    }
+}
+
+/// The run of characters of the same kind (word characters, spaces or
+/// punctuation) around byte `index`.
+fn word_range(text: &str, index: usize) -> (usize, usize) {
+    let kind = |c: char| {
+        if c.is_alphanumeric() || c == '_' {
+            0
+        } else if c.is_whitespace() {
+            1
+        } else {
+            2
+        }
+    };
+    // The character after the index, or the one before it at the end.
+    let Some(here) = text[index..]
+        .chars()
+        .next()
+        .or_else(|| text[..index].chars().next_back())
+        .map(kind)
+    else {
+        return (index, index);
+    };
+    let start = text[..index]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| kind(*c) == here)
+        .last()
+        .map_or(index, |(i, _)| i);
+    let end = text[index..]
+        .char_indices()
+        .find(|(_, c)| kind(*c) != here)
+        .map_or(text.len(), |(i, _)| index + i);
+    (start, end)
 }
 
 impl TextEditState {
@@ -176,6 +275,12 @@ pub struct TextEdit<'t> {
     accessible_label: Option<String>,
     id: Option<Id>,
     select_all_on_focus: bool,
+    margin: Vec2,
+    pub(crate) frame_style: FrameOverride,
+    /// Extra space before and after the text, for icons drawn over the
+    /// field (e.g. by `SearchField`).
+    pub(crate) inset: [f32; 2],
+    password: bool,
 }
 
 impl<'t> TextEdit<'t> {
@@ -190,6 +295,10 @@ impl<'t> TextEdit<'t> {
             accessible_label: None,
             id: None,
             select_all_on_focus: false,
+            margin: vec2(8.0, 4.0),
+            frame_style: FrameOverride::default(),
+            inset: [0.0, 0.0],
+            password: false,
         }
     }
 
@@ -236,6 +345,22 @@ impl<'t> TextEdit<'t> {
         self
     }
 
+    frame_setters!();
+
+    /// Shows every character as • (passwords, keys). Copying and cutting
+    /// are disabled; screen readers get the masked text too. For
+    /// single-line fields.
+    pub fn password(mut self, password: bool) -> Self {
+        self.password = password;
+        self
+    }
+
+    /// Space between the border and the text (default 8 × 4 points).
+    pub fn margin(mut self, margin: Vec2) -> Self {
+        self.margin = margin;
+        self
+    }
+
     /// Minimum height of a multi-line field, in rows of text.
     pub fn desired_rows(mut self, rows: usize) -> Self {
         self.desired_rows = rows.max(1);
@@ -247,8 +372,9 @@ impl Widget for TextEdit<'_> {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
         let visuals = &style.visuals;
-        let padding = vec2(8.0, 4.0);
+        let padding = self.margin;
         let available = ui.available_width();
+        let min_width = self.frame_style.min_size.map_or(40.0, |m| m.x);
         let width = self
             .desired_width
             .unwrap_or(if self.multiline {
@@ -257,8 +383,9 @@ impl Widget for TextEdit<'_> {
                 240.0
             })
             .min(available)
-            .max(40.0);
-        let inner_width = width - 2.0 * padding.x;
+            .max(min_width);
+        let [inset_left, inset_right] = self.inset;
+        let inner_width = width - 2.0 * padding.x - inset_left - inset_right;
         let row_height = style.body.size * style.body.line_height;
         let wrap = self.multiline.then_some(inner_width);
 
@@ -268,13 +395,22 @@ impl Widget for TextEdit<'_> {
         state.anchor = clamp_to_boundary(self.text, state.anchor);
 
         // Size from the current text (before this frame's edits).
-        let galley = ui.layout_text(self.text, &style.body, wrap);
+        let password = self.password;
+        let layout =
+            |ui: &mut Ui<'_>, text: &str| layout_field(ui, text, &style.body, wrap, password);
+        let galley = layout(ui, self.text);
         let content_height = if self.multiline {
             galley.size.y.max(self.desired_rows as f32 * row_height)
         } else {
             row_height
         };
-        let height = (content_height + 2.0 * padding.y).max(style.spacing.interact_height);
+        let height = self
+            .frame_style
+            .size(
+                vec2(width, content_height + 2.0 * padding.y),
+                style.spacing.interact_height,
+            )
+            .y;
         let rect = ui.allocate_rect(vec2(width, height));
         let mut response = ui.interact(id, rect, Sense::TEXT);
         let role = if self.multiline {
@@ -290,7 +426,11 @@ impl Widget for TextEdit<'_> {
                     .clone()
                     .unwrap_or_else(|| self.hint.clone()),
             )
-            .value(self.text.clone()),
+            .value(if self.password {
+                mask(self.text)
+            } else {
+                self.text.clone()
+            }),
         );
         if response.hovered() || response.dragged() {
             ui.ctx().set_cursor(CursorIcon::Text);
@@ -301,7 +441,7 @@ impl Widget for TextEdit<'_> {
             } else {
                 rect.center().y - row_height / 2.0
             };
-            point(rect.min.x + padding.x - scroll_x, y)
+            point(rect.min.x + padding.x + inset_left - scroll_x, y)
         };
 
         let now = ui.input().time;
@@ -326,7 +466,31 @@ impl Widget for TextEdit<'_> {
             let index = galley.index_at(Point::new(0.0, 0.0) + (pos - text_origin(state.scroll_x)));
             let extend =
                 response.dragged() && !response.drag_started() || ui.input().modifiers.shift;
-            state.move_to(index, extend);
+            if response.drag_started() {
+                state.unit_selection = match response.press_count {
+                    2 => Some(SelectUnit::Word),
+                    n if n >= 3 => Some(SelectUnit::Line),
+                    _ => None,
+                }
+                .map(|unit| {
+                    let (a, b) = unit.range(self.text, index);
+                    (unit, a, b)
+                });
+            }
+            match state.unit_selection {
+                // Whole words or lines, from the first one to the pointer.
+                Some((unit, a, b)) => {
+                    let (c, d) = unit.range(self.text, index);
+                    if c < a {
+                        state.anchor = b;
+                        state.cursor = c;
+                    } else {
+                        state.anchor = a;
+                        state.cursor = d.max(b);
+                    }
+                }
+                None => state.move_to(index, extend),
+            }
             state.preferred_x = None;
         }
 
@@ -356,7 +520,7 @@ impl Widget for TextEdit<'_> {
                         history.get_or_insert_with(|| ui.ctx().data(undo_id).unwrap_or_default());
                     if history.step(self.text, &mut state, redo) {
                         changed = true;
-                        galley = ui.layout_text(self.text, &style.body, wrap);
+                        galley = layout(ui, self.text);
                     }
                     continue;
                 }
@@ -365,6 +529,7 @@ impl Widget for TextEdit<'_> {
                 let edited = match event {
                     Event::Text(text) => insert(self.text, &mut state, &text, self.multiline),
                     Event::Paste(text) => insert(self.text, &mut state, &text, self.multiline),
+                    Event::Copy | Event::Cut if self.password => false,
                     Event::Copy | Event::Cut => {
                         if state.has_selection() {
                             let (a, b) = state.selection();
@@ -433,7 +598,7 @@ impl Widget for TextEdit<'_> {
                 if edited {
                     changed = true;
                     // Later keys (e.g. arrows after typing) need the new layout.
-                    galley = ui.layout_text(self.text, &style.body, wrap);
+                    galley = layout(ui, self.text);
                 }
             }
             if let Some(history) = history {
@@ -453,7 +618,7 @@ impl Widget for TextEdit<'_> {
         if !state.preedit.is_empty() {
             display.insert_str(state.cursor, &state.preedit);
         }
-        let galley = ui.layout_text(&display, &style.body, wrap);
+        let galley = layout(ui, &display);
 
         // Single-line fields scroll sideways to keep the cursor visible.
         if !self.multiline {
@@ -471,16 +636,22 @@ impl Widget for TextEdit<'_> {
         let has_focus = ui.ctx().focused() == Some(id);
 
         // Frame.
+        let custom = self.frame_style;
         let stroke = if has_focus {
             Stroke::new(1.5, visuals.accent)
         } else {
-            ui.widget_visuals(&response).stroke
+            custom.stroke(ui.widget_visuals(&response).stroke)
         };
-        ui.painter()
-            .rect(rect, visuals.corner_radius, visuals.text_field_fill, stroke);
+        let fill = custom.fill.unwrap_or(visuals.text_field_fill);
+        let radius = custom.corner_radius(visuals.corner_radius);
+        ui.painter().rect(rect, radius, fill, stroke);
 
         let saved_clip = ui.clip_rect();
-        ui.set_clip_rect(rect.expand(-1.0));
+        let text_clip = Rect::from_min_max(
+            point(rect.min.x + inset_left, rect.min.y),
+            point(rect.max.x - inset_right, rect.max.y),
+        );
+        ui.set_clip_rect(text_clip.expand(-1.0));
         if has_focus {
             let selection = visuals.selection;
             let (a, b) = state.selection();

@@ -147,6 +147,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "themes".to_owned(),
             inner_size: (900.0, 560.0),
+            ..Default::default()
         },
         Demo {
             theme: Theme::Light,

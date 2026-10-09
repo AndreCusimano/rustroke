@@ -118,6 +118,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "Rustroke — files".into(),
             inner_size: (760.0, 520.0),
+            ..Default::default()
         },
         Editor {
             status: "Ready".into(),

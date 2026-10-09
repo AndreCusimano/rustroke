@@ -103,6 +103,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "text".to_owned(),
             inner_size: (720.0, 600.0),
+            ..Default::default()
         },
         TextDemo,
     )

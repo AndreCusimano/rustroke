@@ -82,6 +82,8 @@ pub enum Order {
     Background,
     /// Floating windows, ordered among themselves by last use.
     Middle,
+    /// A modal dialog and the veil that blocks everything below it.
+    Modal,
     /// Popups and menus.
     Foreground,
     /// Tooltips, above everything.
@@ -153,6 +155,8 @@ pub struct FrameOutput {
     pub repaint_after: Option<f64>,
     /// Text to put on the system clipboard (copy/cut).
     pub copied_text: Option<String>,
+    /// A link was clicked: open this URL in the browser.
+    pub open_url: Option<String>,
     /// A text field has focus: enable the input method (IME) and show its
     /// candidate window near this rectangle (the text cursor, in points).
     pub ime_cursor: Option<Rect>,
@@ -296,7 +300,10 @@ struct FrameState {
     /// Interactive widgets in the order they were added (later = on top
     /// within a layer).
     widgets: Vec<Placed>,
-    focusables: Vec<Id>,
+    focusables: Vec<(Id, LayerId)>,
+    /// The layer of the modal dialog shown this frame (the last one, if
+    /// several): only it and what is above it take input.
+    modal: Option<LayerId>,
     /// Every widget id seen, interactive or not.
     seen: Vec<Id>,
     /// Shapes of each layer, in creation order.
@@ -313,6 +320,10 @@ struct FrameState {
     keyboard_owner: Option<Id>,
     /// Areas of the top-level Uis (panels, windows, popups).
     ui_areas: Vec<Rect>,
+    /// Areas of widgets with a tooltip.
+    tooltip_areas: Vec<Rect>,
+    /// The app asked for a frame on every pointer move.
+    track_pointer: bool,
 }
 
 impl Default for FrameState {
@@ -320,6 +331,7 @@ impl Default for FrameState {
         Self {
             widgets: Vec::new(),
             focusables: Vec::new(),
+            modal: None,
             seen: Vec::new(),
             layers: Vec::new(),
             root_count: 0,
@@ -329,6 +341,8 @@ impl Default for FrameState {
             described: Vec::new(),
             keyboard_owner: None,
             ui_areas: Vec::new(),
+            tooltip_areas: Vec::new(),
+            track_pointer: false,
         }
     }
 }
@@ -369,6 +383,8 @@ pub struct Context {
     window_order: Vec<LayerId>,
     /// The id of the widget whose popup is open, if any.
     open_popup: Option<Id>,
+    /// Submenus open inside that popup, outermost first.
+    open_submenus: Vec<Id>,
     /// Widget being hovered for tooltip purposes, and since when.
     hover_start: Option<(Id, f64)>,
     textures: TextureManager,
@@ -401,6 +417,7 @@ impl Default for Context {
             hit: None,
             window_order: Vec::new(),
             open_popup: None,
+            open_submenus: Vec::new(),
             hover_start: None,
             textures: TextureManager::default(),
             repaint_callback: RepaintCallback(None),
@@ -476,7 +493,7 @@ impl Context {
 
     /// Records what widget `id` is (for screen readers and [`Context::widgets`]).
     pub(crate) fn describe(&mut self, id: Id, info: WidgetInfo, rect: Rect, enabled: bool) {
-        let focusable = self.this_frame.focusables.contains(&id);
+        let focusable = self.this_frame.focusables.iter().any(|(f, _)| *f == id);
         self.this_frame.described.push(WidgetDescription {
             id,
             info,
@@ -547,6 +564,12 @@ impl Context {
         self.this_frame.output.copied_text = Some(text);
     }
 
+    /// Asks the platform to open `url` in the browser at the end of the
+    /// frame (what clicking a [`crate::Hyperlink`] does).
+    pub fn open_url(&mut self, url: impl Into<String>) {
+        self.this_frame.output.open_url = Some(url.into());
+    }
+
     /// Enables text composition (IME) for this frame, with the candidate
     /// window placed near `cursor_rect`.
     pub fn set_ime_cursor(&mut self, cursor_rect: Rect) {
@@ -586,6 +609,43 @@ impl Context {
         };
         frame.ui_areas.iter().any(|r| r.contains(pos))
             || frame.widgets.iter().any(|w| w.rect.contains(pos))
+    }
+
+    /// Whether moving the pointer to `pos` (window points) can change
+    /// what the last frame showed, so the platform knows if it needs to
+    /// draw a frame: over an interactive widget or a tooltip, when the
+    /// hovered widget changes, while dragging, or when the app asked with
+    /// [`Context::request_pointer_moves`]. Moves over empty space and
+    /// plain text don't need one (the event is still delivered with the
+    /// next frame). Call between frames.
+    pub fn pointer_move_needs_frame(&self, pos: Point) -> bool {
+        let last = &self.this_frame;
+        let shown = self.input.pointer.pos();
+        let hit_now = self.topmost(&last.widgets, Some(pos)).map(|w| w.id);
+        let hit_shown = self.topmost(&last.widgets, shown).map(|w| w.id);
+        let near_tooltip =
+            |p: Option<Point>| p.is_some_and(|p| last.tooltip_areas.iter().any(|r| r.contains(p)));
+        last.track_pointer
+            || self.active.is_some()
+            || self.pressed_on_background
+            || hit_now.is_some()
+            || hit_now != hit_shown
+            || near_tooltip(Some(pos))
+            || near_tooltip(shown)
+    }
+
+    /// Asks for a frame on every pointer move during the next frame, for
+    /// apps that draw something following the pointer outside interactive
+    /// widgets (call it every frame while needed). Without it, moves over
+    /// empty space don't redraw.
+    pub fn request_pointer_moves(&mut self) {
+        self.this_frame.track_pointer = true;
+    }
+
+    /// `rect` shows a tooltip when hovered: pointer moves over it need
+    /// frames.
+    pub(crate) fn add_tooltip_area(&mut self, rect: Rect) {
+        self.this_frame.tooltip_areas.push(rect);
     }
 
     /// A widget is being pressed or dragged (e.g. a slider), so pointer
@@ -650,9 +710,11 @@ impl Context {
             .into_iter()
             .any(|b| self.input.pointer.pressed_at(b).is_some());
         if any_pressed && let Some(popup) = self.open_popup {
-            let in_popup = self
-                .hit
-                .is_some_and(|h| h.layer == popup_layer(popup) || h.id == popup);
+            let in_popup = self.hit.is_some_and(|h| {
+                std::iter::once(popup)
+                    .chain(self.open_submenus.iter().copied())
+                    .any(|p| h.layer == popup_layer(p) || h.id == p)
+            });
             if !in_popup {
                 self.open_popup = None;
             }
@@ -669,6 +731,14 @@ impl Context {
             }
         }
 
+        // Behind a modal dialog nothing keeps the keyboard focus.
+        if self.prev_frame.modal.is_some()
+            && let Some(id) = self.focused
+            && !self.reachable_focusables().contains(&id)
+        {
+            self.focused = None;
+        }
+
         if self.input.consume_key(Key::Tab, Modifiers::NONE) {
             self.move_focus(true);
         }
@@ -680,9 +750,13 @@ impl Context {
         // themselves (cancel). When there is nothing to close, the app gets
         // it (e.g. to leave a tool).
         let text_focused = self.focused.is_some() && self.focused == self.prev_frame.keyboard_owner;
-        let escape_closes = self.open_popup.is_some() || (self.focused.is_some() && !text_focused);
+        // In a modal dialog Escape is left to the dialog (which closes).
+        let escape_closes = self.open_popup.is_some()
+            || (self.focused.is_some() && !text_focused && self.prev_frame.modal.is_none());
         if escape_closes && self.input.consume_key(Key::Escape, Modifiers::NONE) {
-            if self.open_popup.is_some() {
+            if self.open_submenus.pop().is_some() {
+                // Only the innermost submenu closes.
+            } else if self.open_popup.is_some() {
                 self.open_popup = None;
             } else {
                 self.focused = None;
@@ -707,6 +781,12 @@ impl Context {
         }
         if self.open_popup.is_some_and(|id| !seen.contains(&id)) {
             self.open_popup = None;
+        }
+        if self.open_popup.is_none() {
+            self.open_submenus.clear();
+        }
+        if let Some(i) = self.open_submenus.iter().position(|id| !seen.contains(id)) {
+            self.open_submenus.truncate(i);
         }
         if !self.this_frame.hover_tracked {
             self.hover_start = None;
@@ -812,7 +892,7 @@ impl Context {
             });
         }
         if sense.focusable {
-            self.this_frame.focusables.push(id);
+            self.this_frame.focusables.push((id, layer));
         }
 
         let mut response = Response::new(id, rect);
@@ -840,6 +920,9 @@ impl Context {
                 self.active_button = button;
                 let primary = button == PointerButton::Primary;
                 response.drag_started = sense.drag && primary;
+                if primary {
+                    response.press_count = self.input.pointer.click_count();
+                }
                 if primary && sense.focusable {
                     self.focused = Some(id);
                     self.focus_visible = false;
@@ -963,6 +1046,20 @@ impl Context {
         current
     }
 
+    // ---- Modal dialogs ----
+
+    /// A modal dialog is open (this frame or the last one): the rest of
+    /// the UI doesn't take input, and the app should not treat keys as
+    /// shortcuts.
+    pub fn is_modal_open(&self) -> bool {
+        self.this_frame.modal.is_some() || (self.in_frame && self.prev_frame.modal.is_some())
+    }
+
+    /// Marks `layer` as this frame's modal dialog.
+    pub(crate) fn set_modal(&mut self, layer: LayerId) {
+        self.this_frame.modal = Some(layer);
+    }
+
     // ---- Popups ----
 
     /// A popup (menu, combo box list, context menu) is open: keys like
@@ -984,20 +1081,46 @@ impl Context {
     /// Opens the popup belonging to widget `id`, closing any other.
     pub fn open_popup(&mut self, id: Id) {
         self.open_popup = Some(id);
+        self.open_submenus.clear();
     }
 
     /// Opens the popup of `id`, or closes it if it is open.
     pub fn toggle_popup(&mut self, id: Id) {
         if self.is_popup_open(id) {
-            self.open_popup = None;
+            self.close_popup();
         } else {
-            self.open_popup = Some(id);
+            self.open_popup(id);
         }
     }
 
-    /// Closes the open popup, if any.
+    /// Closes the open popup (and its submenus), if any.
     pub fn close_popup(&mut self) {
         self.open_popup = None;
+        self.open_submenus.clear();
+    }
+
+    /// How deep the popup drawn in `layer` is in the open menu: 0 for the
+    /// open popup, 1 for its submenu, ... `None` if it isn't open.
+    pub(crate) fn menu_depth(&self, layer: LayerId) -> Option<usize> {
+        std::iter::once(self.open_popup?)
+            .chain(self.open_submenus.iter().copied())
+            .position(|p| popup_layer(p) == layer)
+    }
+
+    /// Opens submenu `id` from the menu at `depth`, closing deeper ones.
+    pub(crate) fn open_submenu(&mut self, depth: usize, id: Id) {
+        self.open_submenus.truncate(depth);
+        self.open_submenus.push(id);
+    }
+
+    /// Closes the submenus opened from the menu at `depth`.
+    pub(crate) fn close_submenus_from(&mut self, depth: usize) {
+        self.open_submenus.truncate(depth);
+    }
+
+    /// Whether submenu `id` is open.
+    pub(crate) fn is_submenu_open(&self, id: Id) -> bool {
+        self.open_submenus.contains(&id)
     }
 
     /// Marks `id` as used this frame (things that are not widgets but must
@@ -1038,8 +1161,26 @@ impl Context {
             .map(|(_, w)| *w)
     }
 
+    /// Focusable widgets of the previous frame that can take focus: all
+    /// of them, or only those of the modal dialog (and above) while one
+    /// is open.
+    fn reachable_focusables(&self) -> Vec<Id> {
+        let modal = self.prev_frame.modal;
+        self.prev_frame
+            .focusables
+            .iter()
+            .filter(|(_, layer)| modal.is_none_or(|m| self.above_modal(*layer, m)))
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// Whether `layer` is the modal layer `modal` or drawn above it.
+    fn above_modal(&self, layer: LayerId, modal: LayerId) -> bool {
+        layer == modal || layer.order > Order::Modal
+    }
+
     fn move_focus(&mut self, forward: bool) {
-        let list = &self.prev_frame.focusables;
+        let list = self.reachable_focusables();
         if list.is_empty() {
             return;
         }

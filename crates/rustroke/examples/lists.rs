@@ -1,13 +1,16 @@
 //! Icons, lists and scrolling: a toolbar of two-tone SVG icons (lines take
 //! the text color, the blue parts the theme's accent), a feature list you
 //! can select (Cmd/Ctrl+click, Shift+click, arrows) and reorder by
-//! dragging, a side panel as wide as its content, and a timeline that
-//! scrolls sideways.
+//! dragging, filtered by a search field, with eye toggles, a side panel
+//! as wide as its content, and a feature timeline with a rollback marker
+//! to drag between the steps (drawn with the painter, tooltips on free
+//! areas).
 //!
 //! Run with: `cargo run -p rustroke --example lists`
 
 use rustroke::{
-    App, Button, CentralPanel, Frame, IconId, List, Panel, ScrollArea, Style, WindowOptions,
+    App, Button, CentralPanel, CursorIcon, Frame, IconId, IconToggle, List, Panel, Rect,
+    ScrollArea, SearchField, Sense, Stroke, Style, WindowOptions, point, vec2,
 };
 
 // Small icons drawn for this example: black = line, #1E6FFF = accent.
@@ -27,12 +30,17 @@ const EYE: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 
   <path d="M2 12 C6 5 18 5 22 12 C18 19 6 19 2 12 Z" fill="none" stroke="#000" stroke-width="1.6"/>
   <circle cx="12" cy="12" r="3" fill="#000"/>
 </svg>"##;
+const EYE_CLOSED: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <path d="M2 12 C6 5 18 5 22 12 C18 19 6 19 2 12 Z" fill="none" stroke="#000" stroke-width="1.6"/>
+  <path d="M4 20 L20 4" stroke="#000" stroke-width="1.6" stroke-linecap="round"/>
+</svg>"##;
 
 struct Icons {
     extrude: IconId,
     revolve: IconId,
     hole: IconId,
     eye: IconId,
+    eye_closed: IconId,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -55,6 +63,9 @@ struct Demo {
     selection: Vec<usize>,
     dark: bool,
     status: String,
+    filter: String,
+    /// Features after the rollback marker are not computed.
+    rollback: usize,
 }
 
 impl Demo {
@@ -68,6 +79,79 @@ impl Demo {
     }
 }
 
+impl Demo {
+    /// A feature timeline: one icon per feature on a line, each with a
+    /// tooltip, and a marker that can be dragged between them (features
+    /// after it are rolled back). Built from `ui.interact` and the painter.
+    fn timeline(&mut self, ui: &mut rustroke::Ui) {
+        const STEP: f32 = 34.0;
+        let count = self.features.len();
+        let height = 36.0;
+        let width = STEP * (count as f32 + 1.0);
+        let area = ui.allocate_rect(vec2(width, height));
+        let visuals = ui.style().visuals.clone();
+        let y = area.center().y;
+        let x_of = |slot: usize| area.min.x + STEP * (slot as f32 + 0.5);
+        ui.painter().line(
+            point(area.min.x, y),
+            point(area.max.x, y),
+            Stroke::new(1.0, visuals.window_stroke.color),
+        );
+        for (i, feature) in self.features.iter().enumerate() {
+            let center = point(x_of(i) + STEP / 2.0, y);
+            let rect = Rect::from_center_size(center, vec2(26.0, 26.0));
+            let id = ui.id().with(("step", i));
+            let response = ui.interact(id, rect, Sense::CLICK);
+            let rolled_back = i >= self.rollback;
+            let fill = if self.selection.contains(&i) {
+                visuals.selection
+            } else {
+                visuals.panel_fill
+            };
+            ui.painter().rect_filled(rect, 6.0, fill);
+            if let Some(icon) = ui.rasterize_icon(self.icon(feature.kind), 18.0) {
+                let color = if rolled_back {
+                    visuals.weak_text
+                } else {
+                    visuals.text
+                };
+                let pos = center - icon.size / 2.0;
+                ui.paint_icon(pos, &icon, color);
+            }
+            if response.clicked() {
+                self.selection = vec![i];
+            }
+            response.on_hover_text(ui, feature.name.clone());
+        }
+        // The marker sits between two steps; dragging snaps to the gaps.
+        let marker_x = x_of(self.rollback);
+        let marker = Rect::from_center_size(point(marker_x, y), vec2(10.0, height));
+        let id = ui.id().with("rollback");
+        let response = ui.interact(id, marker, Sense::DRAG);
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor(CursorIcon::ResizeHorizontal);
+        }
+        if let Some(pos) = response
+            .interact_pointer_pos()
+            .filter(|_| response.dragged())
+        {
+            let slot = ((pos.x - area.min.x) / STEP).round() as usize;
+            self.rollback = slot.min(count);
+        }
+        let color = if response.dragged() {
+            visuals.accent
+        } else {
+            visuals.warning
+        };
+        ui.painter().line(
+            point(marker_x, area.min.y + 2.0),
+            point(marker_x, area.max.y - 2.0),
+            Stroke::new(3.0, color),
+        );
+        response.on_hover_text(ui, "Rollback: drag to roll features back");
+    }
+}
+
 impl App for Demo {
     fn update(&mut self, frame: &mut Frame) {
         if self.icons.is_none() {
@@ -77,6 +161,7 @@ impl App for Demo {
                 revolve: fonts.add_svg_icon(REVOLVE).expect("valid SVG"),
                 hole: fonts.add_svg_icon(HOLE).expect("valid SVG"),
                 eye: fonts.add_svg_icon(EYE).expect("valid SVG"),
+                eye_closed: fonts.add_svg_icon(EYE_CLOSED).expect("valid SVG"),
             });
         }
         let style = if self.dark {
@@ -86,7 +171,8 @@ impl App for Demo {
         };
         frame.ctx().set_style(style);
         frame.clear_color = frame.ctx().style().visuals.background;
-        let eye = self.icons.as_ref().expect("loaded").eye;
+        let icons = self.icons.as_ref().expect("loaded");
+        let (eye, eye_closed) = (icons.eye, icons.eye_closed);
 
         Panel::top("toolbar").show(frame, |ui| {
             ui.horizontal(|ui| {
@@ -120,19 +206,13 @@ impl App for Demo {
         });
 
         Panel::bottom("timeline").show(frame, |ui| {
-            ScrollArea::horizontal().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for i in 0..40 {
-                        let kind = [Kind::Extrude, Kind::Revolve, Kind::Hole][i % 3];
-                        ui.add(Button::icon_only(self.icon(kind)).frame(false))
-                            .on_hover_text(ui, format!("Step {}", i + 1));
-                    }
-                });
-            });
+            ScrollArea::horizontal().show(ui, |ui| self.timeline(ui));
         });
 
         Panel::left("features").auto_width().show(frame, |ui| {
             ui.heading("Features");
+            ui.add(SearchField::new(&mut self.filter).desired_width(180.0));
+            let filter = self.filter.to_lowercase();
             let icons: Vec<IconId> = self.features.iter().map(|f| self.icon(f.kind)).collect();
             let list = List::new("features")
                 .multi_select(true)
@@ -144,14 +224,20 @@ impl App for Demo {
                     &mut self.selection,
                     |ui, i, feature| {
                         ui.icon(icons[i]);
-                        ui.label(&feature.name);
-                        let eye_button = Button::icon_only(eye)
-                            .frame(false)
-                            .selected(!feature.visible)
-                            .accessible_label("Hide");
-                        if ui.add(eye_button).clicked() {
-                            feature.visible = !feature.visible;
-                        }
+                        // Rows that don't match the search are dimmed.
+                        let matches = feature.name.to_lowercase().contains(&filter);
+                        let color = if matches {
+                            ui.style().visuals.text
+                        } else {
+                            ui.style().visuals.weak_text.with_alpha(0.5)
+                        };
+                        ui.add(rustroke::Label::new(&feature.name).color(color));
+                        ui.add(IconToggle::new(
+                            &mut feature.visible,
+                            eye,
+                            eye_closed,
+                            "Visible",
+                        ));
                     },
                 );
             if let Some((from, to)) = list.moved {
@@ -191,6 +277,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "Rustroke — lists and icons".into(),
             inner_size: (820.0, 520.0),
+            ..Default::default()
         },
         Demo {
             icons: None,
@@ -204,6 +291,8 @@ fn main() -> Result<(), rustroke::RunError> {
             selection: vec![1],
             dark: true,
             status: "drag a row to reorder".into(),
+            filter: String::new(),
+            rollback: 4,
         },
     )
 }

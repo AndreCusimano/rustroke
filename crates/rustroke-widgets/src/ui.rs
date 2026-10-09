@@ -2,7 +2,7 @@ use std::hash::Hash;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
-use rustroke_core::{Color, DisplayList, Galley, InputState, Point, Rect, Vec2};
+use rustroke_core::{Color, DisplayList, Galley, InputState, Point, Rect, Vec2, vec2};
 use rustroke_text::{Fonts, IconId, IconLayer, RasterizedIcon, TextStyle};
 
 use crate::grid::GridLayout;
@@ -696,6 +696,16 @@ impl<'a> Ui<'a> {
         self.add(Label::new(text))
     }
 
+    /// A link showing and opening `url`.
+    pub fn hyperlink(&mut self, url: impl Into<String>) -> Response {
+        self.add(crate::Hyperlink::new(url))
+    }
+
+    /// A link showing `text` and opening `url`.
+    pub fn hyperlink_to(&mut self, text: impl Into<String>, url: impl Into<String>) -> Response {
+        self.add(crate::Hyperlink::from_label_and_url(text, url))
+    }
+
     /// Large, bold text.
     pub fn heading(&mut self, text: impl Into<String>) -> Response {
         let style = self.style.heading.clone();
@@ -797,6 +807,9 @@ impl<'a> Ui<'a> {
         text: impl Into<String>,
         add_contents: impl FnOnce(&mut Ui<'_>) -> R,
     ) -> InnerResponse<Option<R>> {
+        if self.in_menu.is_some() {
+            return self.submenu_button(text, add_contents);
+        }
         let response = self.add(Button::new(text).menu_style(self.layout.is_horizontal()));
         let id = response.id;
         if response.clicked() {
@@ -811,6 +824,41 @@ impl<'a> Ui<'a> {
             .is_popup_open(id)
             .then(|| crate::popup::show_popup(self, id, response.rect, 0.0, add_contents));
         InnerResponse { inner, response }
+    }
+
+    /// A menu item that opens a submenu to its right when hovered or
+    /// clicked (`menu_button` inside a menu).
+    fn submenu_button<R>(
+        &mut self,
+        text: impl Into<String>,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<Option<R>> {
+        let mut button = Button::new(text).shortcut_text("▸");
+        button.opens_submenu = true;
+        let response = self.add(button);
+        let id = response.id;
+        let depth = self.ctx.menu_depth(self.layer);
+        if let Some(depth) = depth
+            && (response.hovered() || response.clicked())
+            && !self.ctx.is_submenu_open(id)
+        {
+            self.ctx.open_submenu(depth, id);
+        }
+        let open = depth.is_some() && self.ctx.is_submenu_open(id);
+        let inner = open.then(|| {
+            let pad = self.style.spacing.window_padding;
+            let anchor = response.rect;
+            crate::popup::show_submenu(self, id, anchor.right_top() + vec2(pad, -pad), add_contents)
+        });
+        InnerResponse { inner, response }
+    }
+
+    /// A plain item of this menu is hovered: submenus opened from this
+    /// menu close.
+    pub(crate) fn menu_item_hovered(&mut self) {
+        if let Some(depth) = self.ctx.menu_depth(self.layer) {
+            self.ctx.close_submenus_from(depth);
+        }
     }
 
     /// Closes the open popup menu (e.g. after choosing an item that is not

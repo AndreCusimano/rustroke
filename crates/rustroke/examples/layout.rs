@@ -103,6 +103,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "layout".to_owned(),
             inner_size: (640.0, 640.0),
+            ..Default::default()
         },
         LayoutDemo {
             name: "André".to_owned(),

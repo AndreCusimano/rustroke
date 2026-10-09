@@ -84,16 +84,18 @@ fn main() -> Result<(), rustroke::RunError> {
 - **Widgets**: labels, buttons, checkboxes, radio buttons, selectable labels,
   sliders, drag values (drag or type a number), combo boxes, progress bars,
   spinners, lists that can be selected and reordered by dragging, single and
-  multi-line text fields (selection, clipboard, undo, word navigation, input
-  methods for accented and Asian text), images (also with rounded corners),
-  SVG icons, toolbar buttons with menus of variants, property grids,
-  separators. Any
-  widget can be disabled.
+  multi-line text fields (selection, double/triple click, clipboard, undo,
+  word navigation, input methods for accented and Asian text, passwords),
+  search fields, links, images (also with rounded corners), SVG icons,
+  two-state icon buttons, toolbar buttons with menus of variants, property
+  grids, separators. Any widget can be disabled, and buttons and fields
+  can have their own colors, borders, radius and size.
 - **Layout**: rows, columns, alignment, wrapping, fixed-size widgets, grids
   with aligned columns.
 - **Containers**: top/bottom/side panels (resizable or as wide as their
-  content), movable and resizable windows, scroll areas (vertical,
-  horizontal, both), popup and context menus, collapsible sections and
+  content), movable and resizable windows, modal dialogs, scroll areas
+  (vertical, horizontal, both), popup and context menus with submenus,
+  collapsible sections and
   trees, tab bars, dockable panels (drag tabs between groups or to a side to
   split), tooltips.
 - **Text**: shaping, bidirectional text and wrapping via cosmic-text. The Inter
@@ -115,7 +117,8 @@ fn main() -> Result<(), rustroke::RunError> {
   into your own texture and show it in the UI without copies, or draw with
   your own shaders inside the UI's render pass (paint callbacks).
 - **More windows**: extra native windows (e.g. a view on a second monitor),
-  sharing the app's state.
+  sharing the app's state. On macOS the app can draw its own top bar next
+  to the window buttons (unified title bar).
 - **Your own event loop**: embed the UI in an app that already owns its
   winit window and wgpu device (`rustroke::Integration`).
 - **Testing**: run your app without a window, click widgets by label, type

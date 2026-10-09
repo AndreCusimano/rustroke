@@ -547,7 +547,17 @@ pub struct PointerState {
     released_at: [Option<Point>; PointerButton::COUNT],
     /// Where the current (or last) press of the primary button started.
     press_origin: Option<Point>,
+    /// Consecutive primary presses close in time and space (2 = double).
+    click_count: u32,
+    /// Time of the last primary press, for counting clicks.
+    last_press_time: f64,
 }
+
+/// Presses at most this far apart (seconds) count as a double click.
+const MULTI_CLICK_TIME: f64 = 0.4;
+
+/// ...and at most this far apart (points).
+const MULTI_CLICK_DISTANCE: f32 = 6.0;
 
 impl PointerState {
     /// Latest pointer position, if the pointer is over the window.
@@ -593,6 +603,13 @@ impl PointerState {
     /// Where the latest primary press started (kept while dragging).
     pub fn press_origin(&self) -> Option<Point> {
         self.press_origin
+    }
+
+    /// How many times in a row the primary button was pressed at about
+    /// the same place, counting the latest press: 1 for a single click, 2
+    /// for a double click, 3 for a triple click...
+    pub fn click_count(&self) -> u32 {
+        self.click_count
     }
 
     /// The position that matters for hit testing this frame: where the
@@ -673,6 +690,16 @@ impl InputState {
                     if *pressed {
                         pointer.pressed_at[i] = Some(*pos);
                         if *button == PointerButton::Primary {
+                            let near = pointer
+                                .press_origin
+                                .is_some_and(|o| (*pos - o).length() <= MULTI_CLICK_DISTANCE);
+                            let soon = raw.time - pointer.last_press_time <= MULTI_CLICK_TIME;
+                            pointer.click_count = if near && soon && pointer.click_count > 0 {
+                                pointer.click_count + 1
+                            } else {
+                                1
+                            };
+                            pointer.last_press_time = raw.time;
                             pointer.press_origin = Some(*pos);
                         }
                     } else {

@@ -58,6 +58,8 @@ pub struct Harness {
     windows: Vec<(Id, WindowOptions)>,
     /// The UI state of each extra window.
     window_contexts: Vec<(Id, Context)>,
+    /// The last frame called [`Frame::close`].
+    close_requested: bool,
 }
 
 impl std::fmt::Debug for Harness {
@@ -134,6 +136,7 @@ impl Harness {
             renderer: None,
             windows: Vec::new(),
             window_contexts: Vec::new(),
+            close_requested: false,
         }
     }
 
@@ -181,6 +184,8 @@ impl Harness {
             title: None,
             windows: Vec::new(),
             window_id: None,
+            close: false,
+            titlebar_height: 0.0,
         };
         app.update(&mut frame);
         let Frame {
@@ -188,9 +193,11 @@ impl Harness {
             clear_color,
             title,
             windows,
+            close,
             ..
         } = frame;
         self.windows = windows;
+        self.close_requested = close;
         self.clear_color = clear_color;
         if title.is_some() {
             self.title = title;
@@ -298,6 +305,8 @@ impl Harness {
             title: None,
             windows: Vec::new(),
             window_id: Some(id),
+            close: false,
+            titlebar_height: 0.0,
         };
         app.update_window(id, &mut frame);
         self.fonts.end_frame();
@@ -325,6 +334,11 @@ impl Harness {
     /// Its `shapes` are in [`Harness::shapes`].
     pub fn output(&self) -> &FrameOutput {
         &self.output
+    }
+
+    /// Whether the last frame of the main window called [`Frame::close`].
+    pub fn close_requested(&self) -> bool {
+        self.close_requested
     }
 
     /// The window title set by the app, if any.
@@ -453,6 +467,27 @@ mod tests {
         assert!(app.on_close_requested());
         assert!(!h.click(&mut app, "Missing"));
         assert!(h.widgets().len() >= 3);
+    }
+
+    /// WIN-06: after a "save changes?" dialog the app closes the window.
+    #[test]
+    fn frame_close_is_reported_for_the_frame_that_called_it() {
+        let mut asking = true;
+        let mut app = |frame: &mut Frame| {
+            frame.ui(|ui| {
+                if asking && ui.button("Discard").clicked() {
+                    asking = false;
+                }
+            });
+            if !asking {
+                frame.close();
+            }
+        };
+        let mut h = Harness::new();
+        h.run(&mut app);
+        assert!(!h.close_requested());
+        assert!(h.click(&mut app, "Discard"));
+        assert!(h.close_requested());
     }
 
     /// TST-04: textures loaded in earlier frames are still drawn.

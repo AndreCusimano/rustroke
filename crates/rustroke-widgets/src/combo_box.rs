@@ -2,9 +2,10 @@
 
 use std::hash::Hash;
 
-use rustroke_core::{Rect, Stroke, point, vec2};
+use rustroke_core::{Color, Rect, Stroke, Vec2, point, vec2};
 
 use crate::popup::show_popup;
+use crate::widgets::{FrameOverride, frame_setters};
 use crate::{Id, InnerResponse, Sense, Ui, WidgetInfo, WidgetRole};
 
 /// A box showing the current choice; clicking it opens a list of options
@@ -28,6 +29,7 @@ pub struct ComboBox {
     label: Option<String>,
     selected_text: String,
     width: Option<f32>,
+    frame_style: FrameOverride,
 }
 
 impl ComboBox {
@@ -40,6 +42,7 @@ impl ComboBox {
             label: Some(label),
             selected_text: String::new(),
             width: None,
+            frame_style: FrameOverride::default(),
         }
     }
 
@@ -51,6 +54,7 @@ impl ComboBox {
             label: None,
             selected_text: String::new(),
             width: None,
+            frame_style: FrameOverride::default(),
         }
     }
 
@@ -59,6 +63,8 @@ impl ComboBox {
         self.selected_text = text.into();
         self
     }
+
+    frame_setters!();
 
     /// Width of the box in points (default: the slider width). The list
     /// is at least as wide.
@@ -77,7 +83,10 @@ impl ComboBox {
     ) -> InnerResponse<Option<R>> {
         let style = ui.style();
         let padding = style.spacing.button_padding;
-        let height = style.spacing.interact_height;
+        let height = self
+            .frame_style
+            .min_size
+            .map_or(style.spacing.interact_height, |m| m.y);
         let id = ui.id().with(self.id_salt);
         let label = self
             .label
@@ -89,6 +98,7 @@ impl ComboBox {
         let width = self
             .width
             .unwrap_or(style.spacing.slider_width)
+            .max(self.frame_style.min_size.map_or(0.0, |m| m.x))
             .min(ui.available_width() - label_width)
             .max(2.0 * height);
 
@@ -117,9 +127,11 @@ impl ComboBox {
 
         // The box: current choice on the left, a chevron on the right.
         let visuals = ui.widget_visuals(&response);
-        let radius = style.visuals.corner_radius;
+        let custom = self.frame_style;
+        let radius = custom.corner_radius(style.visuals.corner_radius);
+        let fill = custom.fill(&response, visuals.bg_fill, style.visuals.text);
         ui.painter()
-            .rect(box_rect, radius, visuals.bg_fill, visuals.stroke);
+            .rect(box_rect, radius, fill, custom.stroke(visuals.stroke));
         let arrow = 4.0;
         let arrow_center = point(box_rect.max.x - padding.x - arrow, box_rect.center().y);
         let text_rect = Rect::from_min_max(

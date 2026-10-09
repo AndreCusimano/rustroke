@@ -24,6 +24,7 @@ impl App for Demo {
                 WindowOptions {
                     title: "Assembly view".into(),
                     inner_size: (420.0, 300.0),
+                    ..Default::default()
                 },
             );
         }
@@ -65,6 +66,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "Rustroke — windows".into(),
             inner_size: (520.0, 320.0),
+            ..Default::default()
         },
         Demo {
             show_assembly: true,

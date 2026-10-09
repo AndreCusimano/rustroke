@@ -116,6 +116,7 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "extras".to_owned(),
             inner_size: (620.0, 640.0),
+            ..Default::default()
         },
         Demo {
             logo: None,

@@ -1,9 +1,11 @@
-//! Toolbar buttons: a large icon, optionally with a menu of variants.
+//! Toolbar buttons: a large icon, optionally with a menu of variants, and
+//! two-state icon buttons.
 
-use rustroke_core::{Rect, Stroke, point, vec2};
+use rustroke_core::{Color, Rect, Stroke, Vec2, point, vec2};
 use rustroke_text::IconId;
 
-use crate::{Button, Response, Sense, Ui, WidgetInfo, WidgetRole};
+use crate::widgets::{FrameOverride, frame_setters};
+use crate::{Button, Response, Sense, Ui, Widget, WidgetInfo, WidgetRole};
 
 /// Width of the ▾ part of a [`ToolButton`] with a menu.
 const ARROW_WIDTH: f32 = 14.0;
@@ -45,6 +47,7 @@ pub struct ToolButton {
     shortcut: String,
     selected: bool,
     icon_size: f32,
+    frame_style: FrameOverride,
 }
 
 impl ToolButton {
@@ -56,8 +59,11 @@ impl ToolButton {
             shortcut: String::new(),
             selected: false,
             icon_size: 22.0,
+            frame_style: FrameOverride::default(),
         }
     }
+
+    frame_setters!();
 
     /// The shortcut shown in the tooltip (e.g. `KeyboardShortcut::format`).
     pub fn shortcut_text(mut self, text: impl Into<String>) -> Self {
@@ -86,11 +92,13 @@ impl ToolButton {
     }
 
     fn button(&self) -> Button {
-        Button::icon_only(self.icon)
+        let mut button = Button::icon_only(self.icon)
             .icon_size(self.icon_size)
             .frame(false)
             .selected(self.selected)
-            .accessible_label(self.label.clone())
+            .accessible_label(self.label.clone());
+        button.frame_style = self.frame_style;
+        button
     }
 
     /// Shows the button alone.
@@ -130,8 +138,9 @@ impl ToolButton {
         let style = ui.style();
         let visuals = ui.widget_visuals(&arrow);
         if arrow.hovered() || arrow.is_pressed() {
+            let radius = self.frame_style.corner_radius(style.visuals.corner_radius);
             ui.painter()
-                .rect_filled(arrow_rect, style.visuals.corner_radius, visuals.bg_fill);
+                .rect_filled(arrow_rect, radius, visuals.bg_fill);
         }
         let c = arrow_rect.center();
         ui.painter().polyline(
@@ -148,6 +157,100 @@ impl ToolButton {
             response,
             arrow,
             inner,
+        }
+    }
+}
+
+/// A frameless icon that switches a `bool` when clicked, showing a
+/// different icon for each state: visibility (eye open / closed) or lock
+/// toggles in a tree, for example. It needs a name for screen readers and
+/// tests; the tooltip shows it too, unless set with
+/// [`IconToggle::tooltip`].
+///
+/// ```ignore
+/// ui.add(IconToggle::new(&mut part.visible, icons.eye, icons.eye_closed, "Visible"));
+/// ```
+#[derive(Debug)]
+pub struct IconToggle<'a> {
+    value: &'a mut bool,
+    on: IconId,
+    off: IconId,
+    label: String,
+    tooltip: Option<String>,
+    icon_size: f32,
+}
+
+impl<'a> IconToggle<'a> {
+    /// Shows `on` while `*value` is true and `off` otherwise; `label`
+    /// names it for screen readers (announced as a checked or unchecked
+    /// checkbox).
+    pub fn new(value: &'a mut bool, on: IconId, off: IconId, label: impl Into<String>) -> Self {
+        Self {
+            value,
+            on,
+            off,
+            label: label.into(),
+            tooltip: None,
+            icon_size: 16.0,
+        }
+    }
+
+    /// Tooltip text instead of the label (empty: no tooltip).
+    pub fn tooltip(mut self, text: impl Into<String>) -> Self {
+        self.tooltip = Some(text.into());
+        self
+    }
+
+    /// Icon size in points (default 16).
+    pub fn icon_size(mut self, size: f32) -> Self {
+        self.icon_size = size;
+        self
+    }
+}
+
+impl Widget for IconToggle<'_> {
+    fn ui(self, ui: &mut Ui<'_>) -> Response {
+        let style = ui.style();
+        let side = self.icon_size + 6.0;
+        let id = ui.next_auto_id();
+        let rect = ui.allocate_rect(vec2(side, side));
+        let mut response = ui.interact(id, rect, Sense::CLICK);
+        if response.clicked() {
+            *self.value = !*self.value;
+            response.mark_changed();
+        }
+        ui.describe(
+            &response,
+            WidgetInfo::new(WidgetRole::Checkbox, self.label.clone()).toggled(*self.value),
+        );
+        let visuals = ui.widget_visuals(&response);
+        if response.hovered() || response.is_pressed() {
+            ui.painter()
+                .rect_filled(rect, style.visuals.small_corner_radius, visuals.bg_fill);
+        }
+        let icon = if *self.value { self.on } else { self.off };
+        if let Some(icon) = ui.rasterize_icon(icon, self.icon_size) {
+            let pos = rect.center() - icon.size / 2.0;
+            // The "off" state is drawn weaker, so it reads as inactive.
+            let color = if *self.value {
+                visuals.fg
+            } else {
+                style.visuals.weak_text
+            };
+            ui.paint_icon(pos, &icon, color);
+        }
+        if response.focus_visible() {
+            ui.painter().rect_stroke(
+                rect.expand(2.0),
+                style.visuals.small_corner_radius + 2.0,
+                Stroke::new(2.0, style.visuals.focus),
+            );
+        }
+        let tooltip = self.tooltip.unwrap_or(self.label);
+        if tooltip.is_empty() {
+            response
+        } else {
+            response.on_hover_text(ui, tooltip)
         }
     }
 }

@@ -106,6 +106,8 @@ pub struct Visuals {
     pub window_corner_radius: f32,
     /// Shadow under floating content.
     pub shadow: Color,
+    /// Veil over the rest of the window behind a [`crate::Modal`].
+    pub modal_backdrop: Color,
     /// Inside text fields.
     pub text_field_fill: Color,
     /// Normal text.
@@ -181,6 +183,7 @@ impl Visuals {
             window_stroke: Stroke::new(1.0, rgb(69, 71, 90)),
             window_corner_radius: 10.0,
             shadow: Color::new(0.0, 0.0, 0.0, 0.35),
+            modal_backdrop: Color::new(0.0, 0.0, 0.0, 0.45),
             text_field_fill: rgb(24, 24, 37),
             text,
             weak_text: rgb(166, 173, 200),
@@ -229,6 +232,7 @@ impl Visuals {
             window_stroke: Stroke::new(1.0, rgb(204, 208, 218)),
             window_corner_radius: 10.0,
             shadow: Color::new(0.0, 0.0, 0.0, 0.18),
+            modal_backdrop: Color::new(0.0, 0.0, 0.0, 0.25),
             text_field_fill: rgb(255, 255, 255),
             text,
             weak_text: rgb(108, 111, 133),

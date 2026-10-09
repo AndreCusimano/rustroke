@@ -25,9 +25,11 @@ mod grid;
 mod id;
 mod layout;
 mod list;
+mod modal;
 mod popup;
 mod property_grid;
 mod response;
+mod search_field;
 mod style;
 mod tabs;
 mod text_edit;
@@ -48,16 +50,18 @@ pub use grid::Grid;
 pub use id::Id;
 pub use layout::{Align, Direction, Layout};
 pub use list::{List, ListResponse};
+pub use modal::{Modal, ModalResponse};
 pub use property_grid::{PropertyGrid, PropertyGridUi, ReferenceField};
 pub use response::{FocusLost, Response};
+pub use search_field::SearchField;
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
 pub use tabs::{TabBar, TabBarResponse, TabLabel};
 pub use text_edit::TextEdit;
-pub use tool_button::{ToolButton, ToolButtonResponse};
+pub use tool_button::{IconToggle, ToolButton, ToolButtonResponse};
 pub use ui::{InnerResponse, Ui};
 pub use widgets::{
-    Button, Checkbox, Icon, Image, Label, Numeric, ProgressBar, RadioButton, SelectableLabel,
-    Separator, Slider, Spinner, Widget,
+    Button, Checkbox, Hyperlink, Icon, Image, Label, Numeric, ProgressBar, RadioButton,
+    SelectableLabel, Separator, Slider, Spinner, Widget,
 };
 
 #[cfg(test)]

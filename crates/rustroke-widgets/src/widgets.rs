@@ -27,6 +27,81 @@ fn paint_focus_ring(ui: &mut Ui<'_>, response: &Response, rect: Rect, corner_rad
     }
 }
 
+/// Per-widget changes to the theme's frame (`.fill(..)`, `.stroke(..)`,
+/// `.corner_radius(..)`, `.min_size(..)` on buttons, text fields and
+/// combo boxes).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct FrameOverride {
+    pub fill: Option<Color>,
+    pub stroke: Option<Stroke>,
+    pub corner_radius: Option<f32>,
+    pub min_size: Option<Vec2>,
+}
+
+impl FrameOverride {
+    /// The background: the custom fill (a bit towards the text color while
+    /// hovered or pressed), or the theme's.
+    pub fn fill(&self, response: &Response, themed: Color, text: Color) -> Color {
+        match self.fill {
+            Some(fill) if response.is_pressed() => fill.lerp(text, 0.2),
+            Some(fill) if response.hovered() => fill.lerp(text, 0.1),
+            Some(fill) => fill,
+            None => themed,
+        }
+    }
+
+    pub fn stroke(&self, themed: Stroke) -> Stroke {
+        self.stroke.unwrap_or(themed)
+    }
+
+    pub fn corner_radius(&self, themed: f32) -> f32 {
+        self.corner_radius.unwrap_or(themed)
+    }
+
+    /// The widget's size from the size of its content plus padding: at
+    /// least `min_size` when set, else at least `interact_height` tall.
+    pub fn size(&self, content: Vec2, interact_height: f32) -> Vec2 {
+        match self.min_size {
+            Some(min) => vec2(content.x.max(min.x), content.y.max(min.y)),
+            None => vec2(content.x, content.y.max(interact_height)),
+        }
+    }
+}
+
+/// Adds the per-widget frame setters to a builder with a `frame_style`
+/// field.
+macro_rules! frame_setters {
+    () => {
+        /// Background color instead of the theme's (slightly lighter or
+        /// darker while hovered and pressed).
+        pub fn fill(mut self, fill: Color) -> Self {
+            self.frame_style.fill = Some(fill);
+            self
+        }
+
+        /// Border instead of the theme's.
+        pub fn stroke(mut self, stroke: impl Into<Stroke>) -> Self {
+            self.frame_style.stroke = Some(stroke.into());
+            self
+        }
+
+        /// Corner radius instead of the theme's.
+        pub fn corner_radius(mut self, radius: f32) -> Self {
+            self.frame_style.corner_radius = Some(radius);
+            self
+        }
+
+        /// Minimum size in points. It replaces the style's
+        /// `interact_height` as the minimum height, so it can also make
+        /// the widget smaller (with small text).
+        pub fn min_size(mut self, size: Vec2) -> Self {
+            self.frame_style.min_size = Some(size);
+            self
+        }
+    };
+}
+pub(crate) use frame_setters;
+
 /// Space between a menu item's text and its shortcut.
 const SHORTCUT_GAP: f32 = 24.0;
 
@@ -100,6 +175,82 @@ impl Widget for Label {
     }
 }
 
+/// A link: text in the accent color, underlined while hovered, that opens
+/// a URL in the browser when clicked (through
+/// [`crate::Context::open_url`]). Without a URL it is a text-styled
+/// button: check `clicked()`.
+#[derive(Clone, Debug)]
+pub struct Hyperlink {
+    text: String,
+    url: Option<String>,
+}
+
+impl Hyperlink {
+    /// A link showing `url` and opening it.
+    pub fn new(url: impl Into<String>) -> Self {
+        let url = url.into();
+        Self {
+            text: url.clone(),
+            url: Some(url),
+        }
+    }
+
+    /// A link showing `text` and opening `url`.
+    pub fn from_label_and_url(text: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            url: Some(url.into()),
+        }
+    }
+
+    /// Link-styled text that opens nothing (e.g. "Show details"); react
+    /// to `clicked()`.
+    pub fn action(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            url: None,
+        }
+    }
+}
+
+impl Widget for Hyperlink {
+    fn ui(self, ui: &mut Ui<'_>) -> Response {
+        let style = ui.style();
+        let galley = ui.layout_text(&self.text, &style.body, None);
+        let response = ui.allocate_response(galley.size, Sense::CLICK);
+        let mut info = WidgetInfo::new(WidgetRole::Link, self.text.clone());
+        if let Some(url) = &self.url {
+            info = info.value(url.clone());
+        }
+        ui.describe(&response, info);
+        if response.hovered() {
+            ui.ctx().set_cursor(CursorIcon::PointingHand);
+        }
+        let color = if response.is_pressed() {
+            style.visuals.accent.lerp(style.visuals.text, 0.3)
+        } else {
+            style.visuals.accent
+        };
+        let rect = response.rect;
+        ui.painter().galley(rect.min, galley, color);
+        if response.hovered() || response.has_focus() {
+            let y = rect.max.y - 1.5;
+            ui.painter().line(
+                point(rect.min.x, y),
+                point(rect.max.x, y),
+                Stroke::new(1.0, color),
+            );
+        }
+        paint_focus_ring(ui, &response, rect, style.visuals.small_corner_radius);
+        if response.clicked()
+            && let Some(url) = self.url
+        {
+            ui.ctx().open_url(url);
+        }
+        response
+    }
+}
+
 /// A clickable button with a text label, an icon, or both.
 #[derive(Clone, Debug)]
 pub struct Button {
@@ -110,6 +261,9 @@ pub struct Button {
     selected: bool,
     accessible_label: Option<String>,
     shortcut_text: String,
+    pub(crate) frame_style: FrameOverride,
+    /// A menu item opening a submenu: clicking it keeps the menu open.
+    pub(crate) opens_submenu: bool,
 }
 
 impl Button {
@@ -123,8 +277,12 @@ impl Button {
             selected: false,
             accessible_label: None,
             shortcut_text: String::new(),
+            frame_style: FrameOverride::default(),
+            opens_submenu: false,
         }
     }
+
+    frame_setters!();
 
     /// A button showing only an icon (toolbars). Give it a name for screen
     /// readers and tests with [`Button::accessible_label`], and usually a
@@ -200,9 +358,12 @@ impl Widget for Button {
         });
         let content_height = galley.size.y.max(icon.as_ref().map_or(0.0, |i| i.size.y));
         let content_width = icon_width + if has_text { galley.size.x } else { 0.0 };
-        let size = vec2(
-            content_width + shortcut_width + 2.0 * padding.x,
-            (content_height + 2.0 * padding.y).max(style.spacing.interact_height),
+        let size = self.frame_style.size(
+            vec2(
+                content_width + shortcut_width + 2.0 * padding.x,
+                content_height + 2.0 * padding.y,
+            ),
+            style.spacing.interact_height,
         );
         let id = ui.next_auto_id();
         let mut rect = ui.allocate_rect(size);
@@ -222,20 +383,27 @@ impl Widget for Button {
             info = info.selected(true);
         }
         ui.describe(&response, info);
-        if response.clicked() && menu_width.is_some() {
-            ui.close_menu();
+        if menu_width.is_some() {
+            if response.clicked() && !self.opens_submenu {
+                ui.close_menu();
+            }
+            if response.hovered() && !self.opens_submenu {
+                ui.menu_item_hovered();
+            }
         }
 
         let visuals = ui.widget_visuals(&response);
-        let radius = style.visuals.corner_radius;
+        let custom = self.frame_style;
+        let radius = custom.corner_radius(style.visuals.corner_radius);
+        let fill = custom.fill(&response, visuals.bg_fill, style.visuals.text);
         if self.selected {
             let fill = style.visuals.selection;
             ui.painter().rect_filled(rect, radius, fill);
-        } else if self.frame && menu_width.is_none() {
+        } else if (self.frame || custom.fill.is_some()) && menu_width.is_none() {
             ui.painter()
-                .rect(rect, radius, visuals.bg_fill, visuals.stroke);
+                .rect(rect, radius, fill, custom.stroke(visuals.stroke));
         } else if response.hovered() || response.is_pressed() {
-            ui.painter().rect_filled(rect, radius, visuals.bg_fill);
+            ui.painter().rect_filled(rect, radius, fill);
         }
         let left = if menu_width.is_some() {
             rect.min.x + padding.x
@@ -456,6 +624,9 @@ impl Widget for RadioButton {
         if response.clicked() && ui.in_menu().is_some() {
             ui.close_menu();
         }
+        if response.hovered() && ui.in_menu().is_some() {
+            ui.menu_item_hovered();
+        }
         ui.describe(
             &response,
             WidgetInfo::new(
@@ -539,8 +710,13 @@ impl Widget for SelectableLabel {
             size.y = size.y.max(style.spacing.interact_height);
         }
         let response = ui.allocate_response(size, Sense::CLICK);
-        if response.clicked() && menu_width.is_some() {
-            ui.close_menu();
+        if menu_width.is_some() {
+            if response.clicked() {
+                ui.close_menu();
+            }
+            if response.hovered() {
+                ui.menu_item_hovered();
+            }
         }
         ui.describe(
             &response,

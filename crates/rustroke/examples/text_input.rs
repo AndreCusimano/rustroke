@@ -3,7 +3,8 @@
 //!
 //! Try: click to place the cursor, drag or Shift+arrows to select,
 //! Cmd/Ctrl+A/C/X/V, Option/Ctrl+arrows to move by word, accented and
-//! Asian input methods. Enter in a single-line field ends editing.
+//! Asian input methods, double-click to select a word and triple-click
+//! a line. Enter in a single-line field ends editing.
 //!
 //! Run with: `cargo run -p rustroke --example text_input`
 
@@ -12,6 +13,7 @@ use rustroke::{App, Frame, Grid, ScrollArea, TextEdit, WindowOptions};
 struct Demo {
     name: String,
     city: String,
+    password: String,
     notes: String,
     submitted: Vec<String>,
 }
@@ -33,6 +35,14 @@ impl App for Demo {
                 ui.add(
                     TextEdit::singleline(&mut self.city)
                         .hint_text("e.g. Milan")
+                        .desired_width(180.0),
+                );
+                ui.end_row();
+
+                ui.label("Password");
+                ui.add(
+                    TextEdit::singleline(&mut self.password)
+                        .password(true)
                         .desired_width(180.0),
                 );
                 ui.end_row();
@@ -71,10 +81,12 @@ fn main() -> Result<(), rustroke::RunError> {
         WindowOptions {
             title: "text_input".to_owned(),
             inner_size: (560.0, 560.0),
+            ..Default::default()
         },
         Demo {
             name: String::new(),
             city: String::new(),
+            password: "secret".into(),
             notes: "This is a multi-line note.\nLong lines wrap automatically when they reach the edge of the field, and the field grows with its content.".to_owned(),
             submitted: Vec::new(),
         },

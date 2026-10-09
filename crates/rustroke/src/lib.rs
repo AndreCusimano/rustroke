@@ -61,30 +61,37 @@
 //! - **Widgets**: [`Ui::label`], [`Ui::button`], [`Ui::checkbox`],
 //!   [`Ui::radio_value`], [`Ui::selectable_value`], [`Slider`],
 //!   [`DragValue`] (drag or type a number), [`ComboBox`] (drop-down list),
-//!   [`TextEdit`], [`Image`], [`Icon`], [`ProgressBar`], [`Spinner`],
-//!   [`List`] (rows to select and reorder by dragging), [`ToolButton`]
-//!   (toolbar icon with a menu of variants), [`PropertyGrid`] (name / value
-//!   rows in collapsible sections) and [`ReferenceField`],
-//!   [`Ui::separator`]; any widget can be disabled with
-//!   [`Ui::add_enabled`]. Implement [`Widget`] for your own.
+//!   [`TextEdit`] (also for passwords), [`SearchField`], [`Hyperlink`],
+//!   [`Image`], [`Icon`], [`IconToggle`] (two-state icon, e.g. an eye),
+//!   [`ProgressBar`], [`Spinner`], [`List`] (rows to select and reorder
+//!   by dragging), [`ToolButton`] (toolbar icon with a menu of variants),
+//!   [`PropertyGrid`] (name / value rows in collapsible sections) and
+//!   [`ReferenceField`], [`Ui::separator`]; any widget can be disabled with
+//!   [`Ui::add_enabled`]. Buttons, fields and combo boxes take their own
+//!   colors and sizes with `.fill(..)`, `.stroke(..)`,
+//!   `.corner_radius(..)` and `.min_size(..)`. Implement [`Widget`] for
+//!   your own.
 //! - **Layout**: a [`Ui`] stacks widgets top to bottom. Use
 //!   [`Ui::horizontal`], [`Ui::vertical_centered`], [`Ui::with_layout`]
 //!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables.
 //! - **Containers**: [`Panel`] (top/bottom/left/right bars), the central
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
-//!   [`ScrollArea`] (vertical, horizontal or both), popup menus (also
-//!   below any rectangle: [`Ui::popup_below`]) ([`Ui::menu_button`]), context menus
+//!   modal dialogs ([`Modal`]), [`ScrollArea`] (vertical, horizontal or
+//!   both), popup menus with submenus ([`Ui::menu_button`]; also below any
+//!   rectangle: [`Ui::popup_below`]), context menus
 //!   ([`Response::context_menu`]), collapsible sections and trees
 //!   ([`CollapsingHeader`]), tab bars ([`TabBar`]), dockable panels
 //!   ([`DockArea`]: tab groups in resizable splits, rearranged by dragging
 //!   tabs) and tooltips ([`Response::on_hover_text`]).
 //!   Show panels before the central area.
 //! - **Mouse and keyboard**: [`Response`] reports clicks and drags per
-//!   button ([`Response::secondary_clicked`], [`Response::dragged_by`]);
+//!   button ([`Response::secondary_clicked`], [`Response::dragged_by`],
+//!   [`Response::double_clicked`]);
 //!   shortcuts are [`KeyboardShortcut`]s checked with
 //!   [`InputState::consume_shortcut`] and shown in menus with
 //!   [`Button::shortcut_text`]. Skip them while
-//!   [`Context::wants_keyboard_input`] (the user is typing).
+//!   [`Context::wants_keyboard_input`] (the user is typing) or
+//!   [`Context::is_modal_open`].
 //! - **Text**: all text uses the bundled Inter font (every weight, e.g.
 //!   `TextStyle::proportional(14.0).weight(600)`) or the platform's UI font
 //!   ([`TextStyle::system`]), with system fonts as fallback for other
@@ -118,7 +125,10 @@
 //! - **Background work**: [`Frame::repaint_handle`] gives a
 //!   [`RepaintHandle`] that wakes the UI up from any thread.
 //! - **Window**: [`Frame::set_title`]; [`App::on_close_requested`] can keep
-//!   the window open (e.g. to ask about unsaved changes).
+//!   the window open (e.g. to ask about unsaved changes), and
+//!   [`Frame::close`] closes it once answered. On macOS,
+//!   [`WindowOptions::unified_titlebar`] lets the app draw its own top bar
+//!   next to the window buttons.
 //! - **More windows**: keep extra native windows open with
 //!   [`Frame::show_window`] (e.g. a view on a second monitor) and draw
 //!   them in [`App::update_window`].
@@ -152,12 +162,12 @@ pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
     Align, Button, CentralPanel, Checkbox, CollapsingHeader, CollapsingResponse, ComboBox, Context,
     CursorIcon, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
-    FrameOutput, Grid, Icon, Id, InnerResponse, Label, LayerId, Layout, List, ListResponse,
-    Numeric, Order, Panel, PanelSide, ProgressBar, PropertyGrid, PropertyGridUi, RadioButton,
-    ReferenceField, RepaintHandle, Response, ScrollArea, SelectableLabel, Sense, Separator, Slider,
-    Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, TextEdit, TextureHandle,
-    ToolButton, ToolButtonResponse, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo,
-    WidgetRole, Window,
+    FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout,
+    List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide, ProgressBar,
+    PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle, Response, ScrollArea,
+    SearchField, SelectableLabel, Sense, Separator, Slider, Spinner, SplitAxis, Style, TabBar,
+    TabBarResponse, TabLabel, TextEdit, TextureHandle, ToolButton, ToolButtonResponse, Ui, UiRoot,
+    Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
 };
 pub use rustroke_winit::{
     App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,

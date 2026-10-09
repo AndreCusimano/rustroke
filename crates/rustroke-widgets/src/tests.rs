@@ -2617,3 +2617,472 @@ fn property_grid_aligns_values_across_sections() {
     run(&mut h, click_at(clear), &mut length, &mut reference);
     assert_eq!(reference, None);
 }
+
+/// Background button "Below", plus a modal with "OK" when `open`.
+struct ModalFrame {
+    below: Response,
+    ok: Option<Response>,
+    should_close: bool,
+}
+
+fn modal_frame(h: &mut Harness, events: Vec<Event>, open: bool) -> ModalFrame {
+    let mut below = None;
+    let mut ok = None;
+    let mut should_close = false;
+    h.frame_with(events, |h| {
+        h.ctx
+            .ui(SCREEN, &mut h.fonts, |ui| below = Some(ui.button("Below")));
+        if open {
+            let r = crate::Modal::new("dialog").title("Confirm").show(h, |ui| {
+                ok = Some(ui.button("OK"));
+                ui.button("Cancel");
+            });
+            should_close = r.should_close;
+        }
+    });
+    ModalFrame {
+        below: below.unwrap(),
+        ok,
+        should_close,
+    }
+}
+
+#[test]
+fn modal_blocks_clicks_and_hover_below() {
+    let mut h = Harness::new();
+    let below = modal_frame(&mut h, vec![], false).below.rect.center();
+    modal_frame(&mut h, vec![], true);
+    modal_frame(&mut h, vec![], true); // measured and centered
+    let f = modal_frame(&mut h, vec![move_to(below)], true);
+    assert!(!f.below.hovered(), "the veil covers the button");
+    modal_frame(&mut h, vec![button(below, true)], true);
+    let f = modal_frame(&mut h, vec![button(below, false)], true);
+    assert!(!f.below.clicked());
+    assert!(!f.should_close, "the veil doesn't close by default");
+    assert!(h.ctx.is_modal_open());
+
+    let ok = f.ok.unwrap().rect.center();
+    modal_frame(&mut h, vec![button(ok, true)], true);
+    let f = modal_frame(&mut h, vec![button(ok, false)], true);
+    assert!(f.ok.unwrap().clicked(), "widgets in the dialog work");
+
+    // Closed: the button below works again.
+    modal_frame(&mut h, vec![], false);
+    modal_frame(&mut h, vec![button(below, true)], false);
+    let f = modal_frame(&mut h, vec![button(below, false)], false);
+    assert!(f.below.clicked());
+    assert!(!h.ctx.is_modal_open());
+}
+
+#[test]
+fn modal_keeps_tab_focus_inside_and_closes_with_escape() {
+    let mut h = Harness::new();
+    // Focus the button below first.
+    let below = modal_frame(&mut h, vec![], false).below.rect.center();
+    modal_frame(
+        &mut h,
+        vec![button(below, true), button(below, false)],
+        false,
+    );
+    assert!(h.ctx.focused().is_some());
+    modal_frame(&mut h, vec![], true);
+    let f = modal_frame(&mut h, vec![], true);
+    assert!(
+        !f.below.has_focus(),
+        "opening a dialog removes focus behind it"
+    );
+
+    let mut focused = Vec::new();
+    for _ in 0..4 {
+        let f = modal_frame(&mut h, vec![key(Key::Tab, Modifiers::NONE)], true);
+        assert!(!f.below.has_focus(), "Tab never leaves the dialog");
+        focused.push(f.ok.unwrap().has_focus());
+    }
+    assert_eq!(
+        focused,
+        [true, false, true, false],
+        "OK, Cancel, OK, Cancel"
+    );
+
+    let f = modal_frame(&mut h, vec![key(Key::Escape, Modifiers::NONE)], true);
+    assert!(f.should_close, "Escape closes even with a button focused");
+}
+
+#[test]
+fn modal_can_close_on_a_click_outside() {
+    let mut h = Harness::new();
+    let frame = |h: &mut Harness, events| {
+        let mut close = false;
+        h.frame_with(events, |h| {
+            close = crate::Modal::new("m")
+                .close_on_click_outside(true)
+                .show(h, |ui| ui.label("Hi"))
+                .should_close;
+        });
+        close
+    };
+    frame(&mut h, vec![]);
+    frame(&mut h, vec![]);
+    let corner = point(5.0, 5.0);
+    frame(&mut h, vec![button(corner, true)]);
+    assert!(frame(&mut h, vec![button(corner, false)]));
+}
+
+/// The rectangle shape drawn exactly at `rect`, if any.
+fn rect_shape_at(
+    h: &Harness,
+    rect: Rect,
+) -> Option<(f32, rustroke_core::Color, rustroke_core::Stroke)> {
+    h.shapes.shapes().iter().find_map(|s| match s.shape {
+        rustroke_core::Shape::Rect {
+            rect: r,
+            corner_radius,
+            fill,
+            stroke,
+        } if r == rect => Some((corner_radius, fill, stroke)),
+        _ => None,
+    })
+}
+
+#[test]
+fn per_widget_frame_style_overrides_the_theme() {
+    use rustroke_core::{Color, Stroke};
+    let red = Color::from_srgb8(200, 30, 30);
+    let mut h = Harness::new();
+    let (button, field) = layout_frame(&mut h, |ui| {
+        let b = ui.add(
+            crate::Button::new("Go")
+                .fill(red)
+                .stroke(Stroke::new(2.0, red))
+                .corner_radius(3.0)
+                .min_size(vec2(90.0, 20.0)),
+        );
+        let mut text = String::from("x");
+        let f = ui.add(
+            crate::TextEdit::singleline(&mut text)
+                .min_size(vec2(60.0, 22.0))
+                .margin(vec2(4.0, 1.0))
+                .corner_radius(4.0),
+        );
+        (b, f)
+    });
+    assert!(button.rect.width() >= 90.0);
+    assert!(
+        button.rect.height() < 28.0,
+        "min_size replaces interact_height: {}",
+        button.rect.height()
+    );
+    let (radius, fill, stroke) = rect_shape_at(&h, button.rect).expect("button frame");
+    assert_eq!((radius, fill, stroke), (3.0, red, Stroke::new(2.0, red)));
+
+    assert!(
+        (field.rect.height() - 22.0).abs() < 0.5,
+        "{}",
+        field.rect.height()
+    );
+    let (radius, ..) = rect_shape_at(&h, field.rect).expect("field frame");
+    assert_eq!(radius, 4.0);
+}
+
+#[test]
+fn search_field_clears_with_the_cross() {
+    let mut h = Harness::new();
+    let mut text = String::from("bolt");
+    let run = |h: &mut Harness, events, text: &mut String| {
+        let mut r = None;
+        h.frame(events, |ui| r = Some(ui.add(crate::SearchField::new(text))));
+        r.unwrap()
+    };
+    let field = run(&mut h, vec![], &mut text).rect;
+    let clear = h
+        .ctx
+        .find_widget("Clear Search…")
+        .expect("× while not empty");
+    assert!(field.contains(clear.rect.center()));
+    let at = clear.rect.center();
+    run(&mut h, vec![button(at, true)], &mut text);
+    let r = run(&mut h, vec![button(at, false)], &mut text);
+    assert!(r.changed());
+    assert_eq!(text, "");
+    run(&mut h, vec![], &mut text);
+    assert!(
+        h.ctx.find_widget("Clear Search…").is_none(),
+        "no × when empty"
+    );
+    let r = run(&mut h, vec![], &mut text);
+    assert!(r.has_focus(), "the field keeps focus after clearing");
+}
+
+#[test]
+fn icon_toggle_switches_and_describes_its_state() {
+    let mut h = Harness::new();
+    let eye = h.fonts.add_svg_icon(TEST_ICON).unwrap();
+    let mut visible = true;
+    let run = |h: &mut Harness, events, visible: &mut bool| {
+        let mut r = None;
+        h.frame(events, |ui| {
+            r = Some(ui.add(crate::IconToggle::new(visible, eye, eye, "Visible")));
+        });
+        r.unwrap()
+    };
+    let at = run(&mut h, vec![], &mut visible).rect.center();
+    assert_eq!(
+        h.ctx.find_widget("Visible").unwrap().info.toggled,
+        Some(true)
+    );
+    run(&mut h, vec![button(at, true)], &mut visible);
+    let r = run(&mut h, vec![button(at, false)], &mut visible);
+    assert!(r.clicked() && r.changed());
+    assert!(!visible);
+}
+
+/// A menu bar with File › (New, Recent › (a.txt, b.txt)).
+fn submenu_frame(h: &mut Harness, events: Vec<Event>, chosen: &mut Option<&'static str>) {
+    h.frame(events, |ui| {
+        ui.horizontal(|ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("New").clicked() {
+                    *chosen = Some("new");
+                }
+                ui.menu_button("Recent", |ui| {
+                    if ui.button("a.txt").clicked() {
+                        *chosen = Some("a");
+                    }
+                    ui.button("b.txt");
+                });
+            });
+        });
+    });
+}
+
+fn click_label(h: &mut Harness, label: &str, chosen: &mut Option<&'static str>) {
+    let at = h.ctx.find_widget(label).unwrap().rect.center();
+    submenu_frame(h, vec![move_to(at)], chosen);
+    submenu_frame(h, vec![button(at, true)], chosen);
+    submenu_frame(h, vec![button(at, false)], chosen);
+    submenu_frame(h, vec![], chosen);
+}
+
+#[test]
+fn submenus_open_on_hover_and_close_with_the_menu() {
+    let mut h = Harness::new();
+    let mut chosen = None;
+    submenu_frame(&mut h, vec![], &mut chosen);
+    click_label(&mut h, "File", &mut chosen);
+    assert!(h.ctx.find_widget("Recent").is_some());
+    assert!(h.ctx.find_widget("a.txt").is_none());
+
+    // Hovering "Recent" opens its submenu.
+    let recent = h.ctx.find_widget("Recent").unwrap().rect.center();
+    submenu_frame(&mut h, vec![move_to(recent)], &mut chosen);
+    submenu_frame(&mut h, vec![], &mut chosen);
+    submenu_frame(&mut h, vec![], &mut chosen);
+    let a = h.ctx.find_widget("a.txt").expect("submenu open").rect;
+    assert!(
+        a.min.x >= h.ctx.find_widget("Recent").unwrap().rect.max.x,
+        "to the right"
+    );
+
+    // Hovering a plain item of the parent menu closes it.
+    let new = h.ctx.find_widget("New").unwrap().rect.center();
+    submenu_frame(&mut h, vec![move_to(new)], &mut chosen);
+    submenu_frame(&mut h, vec![], &mut chosen);
+    assert!(h.ctx.find_widget("a.txt").is_none());
+
+    // Escape closes only the submenu.
+    submenu_frame(&mut h, vec![move_to(recent)], &mut chosen);
+    submenu_frame(&mut h, vec![], &mut chosen);
+    submenu_frame(
+        &mut h,
+        vec![
+            move_to(recent + vec2(0.0, 1.0)),
+            key(Key::Escape, Modifiers::NONE),
+        ],
+        &mut chosen,
+    );
+    submenu_frame(&mut h, vec![], &mut chosen);
+    assert!(h.ctx.find_widget("Recent").is_some(), "the menu stays open");
+
+    // Choosing an item in the submenu closes everything.
+    submenu_frame(&mut h, vec![move_to(recent)], &mut chosen);
+    submenu_frame(&mut h, vec![], &mut chosen);
+    submenu_frame(&mut h, vec![], &mut chosen);
+    click_label(&mut h, "a.txt", &mut chosen);
+    assert_eq!(chosen, Some("a"));
+    assert!(h.ctx.find_widget("Recent").is_none());
+    assert!(!h.ctx.any_popup_open());
+}
+
+/// Presses and releases the primary button at `at` in one frame.
+fn click_events(at: Point) -> Vec<Event> {
+    vec![button(at, true), button(at, false)]
+}
+
+#[test]
+fn double_click_selects_a_word_and_triple_click_the_line() {
+    let mut h = Harness::new();
+    let mut s = String::from("uno due-tre");
+    let (r, _) = edit_frame(&mut h, &mut s, false, vec![]);
+    let body = h.ctx.style().body.clone();
+    let x = h.fonts.layout("uno d", &body, None, 1.0).size.x;
+    let at = point(r.rect.min.x + 8.0 + x, r.rect.center().y);
+
+    edit_frame(&mut h, &mut s, false, click_events(at));
+    let (r, _) = edit_frame(&mut h, &mut s, false, click_events(at));
+    assert!(r.double_clicked());
+    let (_, out) = edit_frame(&mut h, &mut s, false, vec![Event::Copy]);
+    assert_eq!(
+        out.copied_text.as_deref(),
+        Some("due"),
+        "stops at punctuation"
+    );
+
+    h.time += 1.0;
+    edit_frame(&mut h, &mut s, false, click_events(at));
+    edit_frame(&mut h, &mut s, false, click_events(at));
+    let (r, _) = edit_frame(&mut h, &mut s, false, click_events(at));
+    assert!(r.triple_clicked());
+    let (_, out) = edit_frame(&mut h, &mut s, false, vec![Event::Copy]);
+    assert_eq!(out.copied_text.as_deref(), Some("uno due-tre"));
+
+    // Slow clicks are single clicks.
+    h.time += 1.0;
+    edit_frame(&mut h, &mut s, false, click_events(at));
+    h.time += 1.0;
+    let (r, _) = edit_frame(&mut h, &mut s, false, click_events(at));
+    assert!(!r.double_clicked());
+}
+
+#[test]
+fn password_fields_mask_the_text_and_refuse_to_copy() {
+    let mut h = Harness::new();
+    let mut s = String::new();
+    let run = |h: &mut Harness, s: &mut String, events| {
+        let mut response = None;
+        let out = h.frame(events, |ui| {
+            response = Some(
+                ui.add(
+                    crate::TextEdit::singleline(s)
+                        .password(true)
+                        .accessible_label("Key"),
+                ),
+            );
+        });
+        (response.unwrap(), out)
+    };
+    let (r, _) = run(&mut h, &mut s, vec![]);
+    run(&mut h, &mut s, click_events(r.rect.center()));
+    run(&mut h, &mut s, vec![text("pa€s")]);
+    assert_eq!(s, "pa€s");
+    // Arrows and Backspace work on the real characters.
+    run(
+        &mut h,
+        &mut s,
+        vec![press_key(Key::ArrowLeft), press_key(Key::Backspace)],
+    );
+    assert_eq!(s, "pas");
+    let (_, out) = run(&mut h, &mut s, vec![command(Key::A), Event::Copy]);
+    assert_eq!(out.copied_text, None);
+    assert_eq!(
+        h.ctx.find_widget("Key").unwrap().info.value.as_deref(),
+        Some("•••")
+    );
+}
+
+#[test]
+fn hyperlink_asks_the_platform_to_open_its_url() {
+    let mut h = Harness::new();
+    let url = "https://crates.io/crates/rustroke";
+    let link = |ui: &mut Ui<'_>| {
+        ui.add(crate::Hyperlink::from_label_and_url("rustroke", url));
+    };
+    h.frame(vec![], link);
+    let w = h.ctx.find_widget("rustroke").unwrap();
+    assert_eq!(w.info.value.as_deref(), Some(url));
+    let at = w.rect.center();
+    let out = h.frame(vec![move_to(at)], link);
+    assert_eq!(out.cursor, crate::CursorIcon::PointingHand);
+    assert_eq!(out.open_url, None);
+    let out = h.frame(click_events(at), link);
+    assert_eq!(out.open_url.as_deref(), Some(url));
+}
+
+#[test]
+fn windows_resize_in_height_and_clip_their_content() {
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, events| {
+        let mut out = None;
+        h.frame_with(events, |h| {
+            out = Window::new("Long")
+                .default_pos(point(20.0, 20.0))
+                .show(h, |ui| {
+                    crate::ScrollArea::vertical().show(ui, |ui| {
+                        for i in 0..6 {
+                            ui.label(format!("Line {i}"));
+                        }
+                    });
+                })
+                .map(|r| r.response.rect);
+        });
+        out.unwrap()
+    };
+    // The scroll area settles in a few frames.
+    for _ in 0..3 {
+        run(&mut h, vec![]);
+    }
+    let before = run(&mut h, vec![]);
+    let grip = before.max - vec2(5.0, 5.0);
+    let target = point(grip.x + 20.0, 150.0);
+    run(&mut h, vec![button(grip, true)]);
+    run(&mut h, vec![move_to(target)]);
+    run(&mut h, vec![button(target, false)]);
+    let after = run(&mut h, vec![]);
+    assert!(
+        (after.max.y - (150.0 + 5.0)).abs() < 1.0,
+        "the bottom follows the grip: {after:?}"
+    );
+    assert!((after.width() - before.width() - 20.0).abs() < 1.0);
+    // The height stays even though the content is taller.
+    let again = run(&mut h, vec![]);
+    assert_eq!(again, after);
+}
+
+#[test]
+fn pointer_moves_over_empty_space_need_no_frame() {
+    let mut h = Harness::new();
+    let mut tracking = false;
+    let run = |h: &mut Harness, events, tracking: bool| {
+        let mut rects = (Rect::NOTHING, Rect::NOTHING);
+        h.frame(events, |ui| {
+            if tracking {
+                ui.ctx().request_pointer_moves();
+            }
+            rects.0 = ui.button("Button").rect;
+            rects.1 = ui.label("Tip").on_hover_text(ui, "tooltip").rect;
+            ui.label("Plain text");
+        });
+        rects
+    };
+    let (button_rect, tip) = run(&mut h, vec![], tracking);
+    let empty = point(350.0, 250.0);
+    run(&mut h, vec![move_to(empty)], tracking);
+    assert!(!h.ctx.pointer_move_needs_frame(empty + vec2(5.0, 0.0)));
+    assert!(
+        h.ctx.pointer_move_needs_frame(button_rect.center()),
+        "hover starts"
+    );
+    assert!(
+        h.ctx.pointer_move_needs_frame(tip.center()),
+        "tooltip may start"
+    );
+
+    run(&mut h, vec![move_to(button_rect.center())], tracking);
+    assert!(h.ctx.pointer_move_needs_frame(empty), "hover ends");
+
+    tracking = true;
+    run(&mut h, vec![move_to(empty)], tracking);
+    assert!(
+        h.ctx.pointer_move_needs_frame(empty + vec2(5.0, 0.0)),
+        "app asked"
+    );
+}
