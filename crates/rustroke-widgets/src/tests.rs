@@ -3479,3 +3479,71 @@ fn tree_lays_out_only_visible_rows() {
         "scrolled to the end: {nodes:?}"
     );
 }
+
+#[test]
+fn rich_labels_open_their_links() {
+    use rustroke_text::{LayoutJob, TextFormat};
+    let mut h = Harness::new();
+    let mut job = LayoutJob::default();
+    job.append("Read the ", TextFormat::new());
+    job.append("guide", TextFormat::new().link("https://docs.rs/rustroke"));
+    job.append(" first.", TextFormat::new());
+    let show = |ui: &mut Ui<'_>| {
+        ui.add(crate::Label::rich(job.clone()));
+    };
+    h.frame(vec![], show);
+    let label = h.ctx.find_widget("Read the guide first.").unwrap().rect;
+    let body = h.ctx.style().body.clone();
+    let before = h.fonts.layout("Read the ", &body, None, 1.0).size.x;
+    let on_link = point(label.min.x + before + 10.0, label.center().y);
+    let out = h.frame(vec![move_to(on_link)], show);
+    assert_eq!(out.cursor, crate::CursorIcon::PointingHand);
+    let out = h.frame(click_events(on_link), show);
+    assert_eq!(out.open_url.as_deref(), Some("https://docs.rs/rustroke"));
+    // Plain text next to it is not a link.
+    let plain = point(label.min.x + 5.0, label.center().y);
+    let out = h.frame(click_events(plain), show);
+    assert_eq!(out.open_url, None);
+}
+
+#[cfg(feature = "markdown")]
+#[test]
+fn markdown_renders_blocks_inline_formats_and_links() {
+    let source = "# Title\n\nSome **bold** and *italic* text with `code` and a [link](https://example.com).\n\n\
+- first\n- second\n  1. nested\n\n> quoted\n\n```\nfn main() {}\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n---\n\n- [x] done\n";
+    let mut h = Harness::new();
+    let show = |ui: &mut Ui<'_>| {
+        ui.markdown(source);
+    };
+    h.frame(vec![], show);
+    h.frame(vec![], show);
+    let find = |h: &Harness, label: &str| h.ctx.find_widget(label).map(|w| w.rect);
+    let title = find(&h, "Title").expect("heading");
+    let para = find(&h, "Some bold and italic text with code and a link.").expect("paragraph");
+    assert!(title.height() > para.height() / 2.0 && title.max.y <= para.min.y);
+    let first = find(&h, "•  first").expect("bullet");
+    let nested = find(&h, "1. nested").expect("numbered");
+    assert!(nested.min.x > first.min.x, "nested lists are indented");
+    let quoted = find(&h, "quoted").expect("quote");
+    assert!(quoted.min.x > para.min.x);
+    assert!(
+        find(&h, "A").is_some() && find(&h, "2").is_some(),
+        "table cells"
+    );
+    assert!(find(&h, "☑  done").is_some(), "task list");
+    // The link opens.
+    let body = h.ctx.style().body.clone();
+    let before = h
+        .fonts
+        .layout(
+            "Some bold and italic text with code and a ",
+            &body,
+            None,
+            1.0,
+        )
+        .size
+        .x;
+    let at = point(para.min.x + before + 8.0, para.center().y);
+    let out = h.frame(click_events(at), show);
+    assert_eq!(out.open_url.as_deref(), Some("https://example.com"));
+}

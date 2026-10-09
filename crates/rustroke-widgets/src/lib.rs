@@ -25,6 +25,8 @@ mod grid;
 mod id;
 mod layout;
 mod list;
+#[cfg(feature = "markdown")]
+mod markdown;
 mod modal;
 mod popup;
 mod property_grid;
@@ -52,6 +54,8 @@ pub use grid::Grid;
 pub use id::Id;
 pub use layout::{Align, Direction, Layout};
 pub use list::{List, ListResponse};
+#[cfg(feature = "markdown")]
+pub use markdown::{ImageLoader, Markdown};
 pub use modal::{Modal, ModalResponse};
 pub use property_grid::{PropertyGrid, PropertyGridUi, ReferenceField};
 pub use response::{FocusLost, Response};

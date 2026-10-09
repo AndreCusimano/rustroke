@@ -100,7 +100,11 @@ fn main() -> Result<(), rustroke::RunError> {
   collapsible sections and
   trees, tab bars, dockable panels (drag tabs between groups or to a side to
   split), tooltips.
-- **Text**: shaping, bidirectional text and wrapping via cosmic-text. The Inter
+- **Rich text**: labels mixing styles, colors, highlights, underline and
+  links; Markdown documents (optional `markdown` feature: headings, lists,
+  quotes, code blocks, tables, images).
+- **Text**: shaping, bidirectional text (right-to-left paragraphs aligned
+  and selected correctly) and wrapping via cosmic-text. The Inter
   font (variable: every weight from thin to black), the platform's UI font
   (SF Pro, Segoe UI) on request, and a symbol font (arrows, math, technical symbols) are bundled; system
   fonts are used for emoji and other scripts.
@@ -153,6 +157,7 @@ cargo run -p rustroke --example integration # the UI inside your own winit loop 
 cargo run -p rustroke --example layout      # rows, alignment, wrapping, grids
 cargo run -p rustroke --example containers  # menus, panels, windows, scroll areas, tooltips
 cargo run -p rustroke --example table       # 100 000-row table and a large tree
+cargo run -p rustroke --example rich_text --features markdown   # rich text, Markdown, right-to-left
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
 cargo run -p rustroke --example themes      # live theme editor
 cargo run -p rustroke --example extras      # images, disabled widgets, accessibility

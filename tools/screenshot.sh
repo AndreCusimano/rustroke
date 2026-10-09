@@ -14,7 +14,7 @@ mkdir -p "$root/target/tools" "$(dirname "$out")"
 if [ ! -x "$helper" ] || [ "$root/tools/window_id.swift" -nt "$helper" ]; then
     swiftc -O "$root/tools/window_id.swift" -o "$helper"
 fi
-cargo build -q -p rustroke --example "$example"
+cargo build -q -p rustroke --example "$example" --all-features
 
 "$root/target/debug/examples/$example" >/dev/null 2>&1 &
 pid=$!

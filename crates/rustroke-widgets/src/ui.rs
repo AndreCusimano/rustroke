@@ -360,6 +360,18 @@ impl<'a> Ui<'a> {
         self.fonts.layout(text, style, wrap_width, ppp)
     }
 
+    /// Lays out rich text (see [`rustroke_text::LayoutJob`]); sections
+    /// without a style use `style`.
+    pub fn layout_job(
+        &mut self,
+        job: &rustroke_text::LayoutJob,
+        style: &TextStyle,
+        wrap_width: Option<f32>,
+    ) -> Arc<Galley> {
+        let ppp = self.pixels_per_point();
+        self.fonts.layout_job(job, style, wrap_width, ppp)
+    }
+
     /// The icon rasterized for this Ui's screen density and theme (see
     /// `Fonts::add_svg_icon`), fitting a `size` point square.
     pub fn rasterize_icon(&mut self, id: IconId, size: f32) -> Option<RasterizedIcon> {

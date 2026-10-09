@@ -1,4 +1,4 @@
-use crate::{AtlasRegion, Point, Rect, Vec2};
+use crate::{AtlasRegion, Color, Point, Rect, Vec2};
 
 /// A block of text that has been laid out and whose glyphs have been
 /// rasterized into a [`crate::TextureAtlas`]. Produced by the text crate,
@@ -7,7 +7,7 @@ use crate::{AtlasRegion, Point, Rect, Vec2};
 /// Glyph positions are stored in **physical pixels** relative to the galley
 /// origin, so text stays pixel-aligned (crisp) once the origin is snapped
 /// to the pixel grid.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Galley {
     /// Layout size in logical points: width of the widest line and total
     /// height of all lines. Use this to measure text.
@@ -21,6 +21,24 @@ pub struct Galley {
     /// Visual lines, top to bottom, with cursor positions. Always at least
     /// one (an empty text has one empty row).
     pub rows: Vec<GalleyRow>,
+    /// Backgrounds, underlines and strike-through lines of rich text.
+    pub decorations: Vec<GalleyDecoration>,
+    /// Where each section of rich text is, one rectangle per row it
+    /// covers, relative to the origin: `(section index, area)`. Used to
+    /// find links under the pointer.
+    pub sections: Vec<(usize, Rect)>,
+}
+
+/// A rectangle drawn with a galley: a text background (behind the
+/// glyphs) or an underline or strike-through line (over them).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GalleyDecoration {
+    /// Relative to the galley origin, in points.
+    pub rect: Rect,
+    /// `None`: the color the galley is drawn with.
+    pub color: Option<Color>,
+    /// Drawn before the glyphs (backgrounds).
+    pub behind: bool,
 }
 
 /// One visual line of a [`Galley`] (a paragraph may wrap into several).
@@ -67,7 +85,7 @@ impl GalleyRow {
 }
 
 /// One rasterized glyph of a [`Galley`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GlyphQuad {
     /// Top-left of the glyph bitmap, in physical pixels from the galley origin.
     pub offset_px: [i32; 2],
@@ -76,6 +94,9 @@ pub struct GlyphQuad {
     /// Color glyph (e.g. emoji): drawn with its own colors instead of the
     /// text color.
     pub colored: bool,
+    /// Its own color (rich text), instead of the color the galley is drawn
+    /// with; that color's alpha still applies (e.g. to fade disabled text).
+    pub color: Option<Color>,
 }
 
 impl Galley {
@@ -125,28 +146,59 @@ impl Galley {
     }
 
     /// Rectangles covering the text between two byte indices (in any
-    /// order), one per row, relative to the origin. For drawing selections.
+    /// order), relative to the origin, for drawing selections: one per row,
+    /// or more where right-to-left and left-to-right text mix.
     pub fn selection_rects(&self, a: usize, b: usize) -> Vec<Rect> {
         let (start, end) = (a.min(b), a.max(b));
         if start == end {
             return Vec::new();
         }
-        self.rows
+        let mut rects = Vec::new();
+        for r in self
+            .rows
             .iter()
             .filter(|r| r.start() <= end && start <= r.end())
-            .filter_map(|r| {
-                let x0 = r.x_of(start.max(r.start()));
-                let mut x1 = r.x_of(end.min(r.end()));
-                // A selection continuing past the row end (newline): show a
-                // little space so empty lines are visibly selected.
-                if end > r.end() {
-                    x1 += 4.0;
+        {
+            // Every character between two cursor positions inside the
+            // range is selected, wherever it is drawn.
+            let mut spans: Vec<(f32, f32)> = r
+                .carets
+                .windows(2)
+                .filter(|w| w[0].0 >= start && w[1].0 <= end)
+                .map(|w| (w[0].1.min(w[1].1), w[0].1.max(w[1].1)))
+                .collect();
+            // A selection continuing past the row end (newline): show a
+            // little space so empty lines are visibly selected.
+            if end > r.end() {
+                let x = r.x_of(r.end());
+                spans.push((x, x + 4.0));
+            }
+            spans.sort_by(|p, q| p.0.total_cmp(&q.0));
+            let mut merged: Vec<(f32, f32)> = Vec::new();
+            for (x0, x1) in spans {
+                match merged.last_mut() {
+                    Some(last) if x0 <= last.1 + 0.5 => last.1 = last.1.max(x1),
+                    _ => merged.push((x0, x1)),
                 }
-                (x1 > x0).then(|| {
-                    Rect::from_min_max(Point::new(x0, r.top), Point::new(x1, r.top + r.height))
-                })
-            })
-            .collect()
+            }
+            rects.extend(
+                merged
+                    .into_iter()
+                    .filter(|(x0, x1)| x1 > x0)
+                    .map(|(x0, x1)| {
+                        Rect::from_min_max(Point::new(x0, r.top), Point::new(x1, r.top + r.height))
+                    }),
+            );
+        }
+        rects
+    }
+
+    /// The rich-text section at `pos` (relative to the origin), if any.
+    pub fn section_at(&self, pos: Point) -> Option<usize> {
+        self.sections
+            .iter()
+            .find(|(_, r)| r.contains(pos))
+            .map(|(i, _)| *i)
     }
 
     /// Everything this galley may draw on, relative to its origin.
@@ -177,6 +229,7 @@ mod tests {
                 row(20.0, &[(3, 0.0), (4, 10.0), (5, 20.0)]),
                 row(40.0, &[(6, 0.0), (7, 10.0), (8, 20.0)]),
             ],
+            ..Default::default()
         }
     }
 

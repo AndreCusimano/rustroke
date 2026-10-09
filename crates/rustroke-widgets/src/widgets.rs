@@ -116,10 +116,12 @@ fn text_pos(rect: Rect, x: f32, galley: &Galley) -> Point {
     point(x, rect.center().y - galley.size.y / 2.0)
 }
 
-/// Text that wraps to the available width.
+/// Text that wraps to the available width: plain, or rich text with
+/// several formats and links ([`Label::rich`]).
 #[derive(Clone, Debug)]
 pub struct Label {
     text: String,
+    job: Option<rustroke_text::LayoutJob>,
     style: Option<TextStyle>,
     color: Option<Color>,
     wrap: bool,
@@ -130,9 +132,29 @@ impl Label {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
+            job: None,
             style: None,
             color: None,
             wrap: true,
+        }
+    }
+
+    /// Rich text: sections in different styles, colors, with backgrounds,
+    /// underlines or links (see [`rustroke_text::LayoutJob`]). Links are
+    /// drawn in the accent color unless they have their own, underlined
+    /// while hovered, and open their URL when clicked.
+    ///
+    /// ```ignore
+    /// let mut job = LayoutJob::default();
+    /// job.append("Read the ", TextFormat::new());
+    /// job.append("guide", TextFormat::new().link("https://docs.rs/rustroke"));
+    /// ui.add(Label::rich(job));
+    /// ```
+    pub fn rich(job: rustroke_text::LayoutJob) -> Self {
+        Self {
+            text: job.text.clone(),
+            job: Some(job),
+            ..Self::new("")
         }
     }
 
@@ -163,14 +185,61 @@ impl Widget for Label {
         let wrap = (self.wrap && !ui.layout().is_horizontal())
             .then(|| ui.available_width())
             .filter(|w| w.is_finite());
-        let galley = ui.layout_text(&self.text, &text_style, wrap);
-        let response = ui.allocate_response(galley.size, Sense::HOVER);
+        let links = self.job.as_ref().is_some_and(|j| j.has_links());
+        let galley = match &self.job {
+            Some(job) => {
+                // Links take the accent color unless they have their own.
+                let mut job = job.clone();
+                for (_, format) in &mut job.sections {
+                    if format.link.is_some() && format.color.is_none() {
+                        format.color = Some(style.visuals.accent);
+                    }
+                }
+                ui.layout_job(&job, &text_style, wrap)
+            }
+            None => ui.layout_text(&self.text, &text_style, wrap),
+        };
+        let sense = if links {
+            Sense {
+                focusable: false,
+                activate_with_keys: false,
+                ..Sense::CLICK
+            }
+        } else {
+            Sense::HOVER
+        };
+        let response = ui.allocate_response(galley.size, sense);
         ui.describe(
             &response,
             WidgetInfo::new(WidgetRole::Label, self.text.clone()),
         );
         let color = self.color.unwrap_or(style.visuals.text);
-        ui.painter().galley(response.rect.min, galley, color);
+        let origin = response.rect.min;
+        // The link under the pointer.
+        let hovered_link = (links && response.hovered())
+            .then_some(response.hover_pos)
+            .flatten()
+            .and_then(|p| galley.section_at(Point::ZERO + (p - origin)))
+            .and_then(|i| {
+                let job = self.job.as_ref()?;
+                job.sections[i].1.link.clone().map(|url| (i, url))
+            });
+        ui.painter().galley(origin, Arc::clone(&galley), color);
+        if let Some((section, url)) = hovered_link {
+            ui.ctx().set_cursor(CursorIcon::PointingHand);
+            let accent = style.visuals.accent;
+            for (_, r) in galley.sections.iter().filter(|(i, _)| *i == section) {
+                let y = origin.y + r.max.y - 2.0;
+                ui.painter().line(
+                    point(origin.x + r.min.x, y),
+                    point(origin.x + r.max.x, y),
+                    Stroke::new(1.0, accent),
+                );
+            }
+            if response.clicked() {
+                ui.ctx().open_url(url);
+            }
+        }
         response
     }
 }

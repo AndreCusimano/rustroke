@@ -254,6 +254,26 @@ impl Tessellator {
         let galley_ppp = galley.pixels_per_point;
         let tint = premultiplied(color);
         let emoji_tint = premultiplied(Color::WHITE.with_alpha(color.a));
+        // Rich text: own colors, still faded with the galley's alpha.
+        let own = |c: Option<Color>| c.map_or(tint, |c| premultiplied(c.with_alpha(c.a * color.a)));
+        let decoration = |mesh: &mut Mesh, d: &crate::GalleyDecoration| {
+            let r =
+                Rect::from_min_max(origin + d.rect.min.to_vec2(), origin + d.rect.max.to_vec2());
+            let c = own(d.color);
+            let first = mesh.next_index();
+            for pos in [
+                r.min,
+                Point::new(r.max.x, r.min.y),
+                r.max,
+                Point::new(r.min.x, r.max.y),
+            ] {
+                self.push_vertex(mesh, pos, c);
+            }
+            mesh.quad(first, first + 1, first + 2, first + 3);
+        };
+        for d in galley.decorations.iter().filter(|d| d.behind) {
+            decoration(mesh, d);
+        }
         for glyph in &galley.glyphs {
             let r = glyph.region;
             let min = origin
@@ -264,7 +284,11 @@ impl Tessellator {
                 (r.x + r.width) as f32 / self.atlas_size,
                 (r.y + r.height) as f32 / self.atlas_size,
             ];
-            let color = if glyph.colored { emoji_tint } else { tint };
+            let color = if glyph.colored {
+                emoji_tint
+            } else {
+                own(glyph.color)
+            };
             let first = mesh.next_index();
             for (pos, uv) in [
                 (min, uv_min),
@@ -275,6 +299,9 @@ impl Tessellator {
                 mesh.vertices.push(Vertex { pos, uv, color });
             }
             mesh.quad(first, first + 1, first + 2, first + 3);
+        }
+        for d in galley.decorations.iter().filter(|d| !d.behind) {
+            decoration(mesh, d);
         }
     }
 
@@ -833,8 +860,10 @@ mod tests {
                 offset_px: [2, 3],
                 region,
                 colored: false,
+                color: None,
             }],
             rows: Vec::new(),
+            ..Default::default()
         };
         let shape = Shape::Text {
             // 10.3 points = 20.6 px, snapped to 21 px.

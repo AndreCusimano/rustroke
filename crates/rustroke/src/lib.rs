@@ -94,10 +94,15 @@
 //!   [`Button::shortcut_text`]. Skip them while
 //!   [`Context::wants_keyboard_input`] (the user is typing) or
 //!   [`Context::is_modal_open`].
+//! - **Rich text**: [`Label::rich`] shows a [`LayoutJob`] whose sections
+//!   have their own [`TextFormat`] (bold, italic, colors, highlights,
+//!   underline, links). With the `markdown` feature, `ui.markdown(text)`
+//!   renders Markdown documents.
 //! - **Text**: all text uses the bundled Inter font (every weight, e.g.
 //!   `TextStyle::proportional(14.0).weight(600)`) or the platform's UI font
 //!   ([`TextStyle::system`]), with system fonts as fallback for other
-//!   scripts and emoji. Fields support selection,
+//!   scripts and emoji; right-to-left scripts are aligned and selected
+//!   correctly. Fields support selection,
 //!   clipboard, undo/redo and input methods (IME); Escape cancels an edit and
 //!   [`Response::lost_focus_reason`] tells why editing ended.
 //! - **Style**: [`Style::dark`] / [`Style::light`], changed at runtime with
@@ -140,7 +145,7 @@
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
-//! `table`,
+//! `table`, `rich_text` with `--features markdown`,
 //! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
@@ -158,8 +163,8 @@ pub use rustroke_core::{
     Rect, Shape, Stroke, TextureId, TexturesDelta, Vec2, point, vec2,
 };
 pub use rustroke_text::{
-    FontFamily, Fonts, ICON_ACCENT_SOURCE_COLOR, IconError, IconId, IconLayer, RasterizedIcon,
-    TextStyle,
+    FontFamily, Fonts, ICON_ACCENT_SOURCE_COLOR, IconError, IconId, IconLayer, LayoutJob,
+    RasterizedIcon, TextFormat, TextStyle,
 };
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
@@ -173,6 +178,8 @@ pub use rustroke_widgets::{
     TextureHandle, ToolButton, ToolButtonResponse, Tree, TreeResponse, Ui, UiRoot, Visuals, Widget,
     WidgetDescription, WidgetInfo, WidgetRole, Window,
 };
+#[cfg(feature = "markdown")]
+pub use rustroke_widgets::{ImageLoader, Markdown};
 pub use rustroke_winit::{
     App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,
     WindowOptions, run, testing, wgpu, winit,

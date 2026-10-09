@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-09
+
+### Added
+
+- **Rich text**: `LayoutJob` (sections of text, each with a `TextFormat`:
+  style, italic, color, background, underline, strike-through, link),
+  laid out with `Fonts::layout_job` / `Ui::layout_job` and shown with
+  `Label::rich(job)`. Links take the accent color, are underlined under
+  the pointer and open their URL when clicked. Sections can have
+  different sizes on one line.
+- **Markdown** (feature `markdown`, pulldown-cmark): `ui.markdown(text)` /
+  `Markdown::new(text).image_loader(..).show(ui)` with headings, bold,
+  italic, strike-through, inline code, links, nested bulleted and
+  numbered lists, task lists, block quotes, code blocks, tables, rules
+  and images.
+- `Galley::decorations`, `Galley::sections` and `Galley::section_at`;
+  `GlyphQuad::color` (per-glyph color, still faded with the shape's
+  alpha). New `rich_text` example (`--features markdown`).
+
+### Changed
+
+- **Right-to-left text**: paragraphs in Arabic, Hebrew... are aligned to
+  the right of the wrap width (the galley spans it), and selections in
+  mixed-direction text cover the right characters (several rectangles
+  per row when needed).
+- `GlyphQuad` has a new field, `color`, and is no longer `Eq`; `Galley`
+  has new fields (`decorations`, `sections`) and implements `Default`.
+- CI runs clippy, tests and docs with `--all-features`; docs.rs builds
+  with all features.
+
 ## [0.10.0] — 2026-10-09
 
 ### Added
@@ -388,7 +418,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/AndreCusimano/rustroke/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/AndreCusimano/rustroke/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/AndreCusimano/rustroke/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/AndreCusimano/rustroke/compare/v0.7.0...v0.8.0

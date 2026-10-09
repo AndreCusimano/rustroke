@@ -17,3 +17,11 @@ workspace = true
 rustroke-core.workspace = true
 rustroke-text.workspace = true
 accesskit.workspace = true
+pulldown-cmark = { workspace = true, optional = true }
+
+[features]
+## Render Markdown with `Markdown` / `Ui::markdown`.
+markdown = ["dep:pulldown-cmark"]
+
+[package.metadata.docs.rs]
+all-features = true

@@ -21,9 +21,13 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, Family, FontSystem, Metrics, Shaping, SwashCache, SwashContent, Weight,
+    Attrs, Buffer, CacheKey, Family, FontSystem, Metrics, Shaping, Style, SwashCache, SwashContent,
+    Weight,
 };
-use rustroke_core::{AtlasRegion, Color, Galley, GalleyRow, GlyphQuad, TextureAtlas, Vec2};
+use rustroke_core::{
+    AtlasRegion, Color, Galley, GalleyDecoration, GalleyRow, GlyphQuad, Point, Rect, TextureAtlas,
+    Vec2,
+};
 
 /// Inter as a variable font: every weight from 100 to 900 in one file.
 const INTER: &[u8] = include_bytes!("../fonts/InterVariable.ttf");
@@ -140,6 +144,142 @@ impl TextStyle {
         self.size.to_bits().hash(state);
         self.effective_weight().hash(state);
         self.line_height.to_bits().hash(state);
+    }
+}
+
+/// How one section of rich text looks. Unset fields use the defaults of
+/// the widget showing the text (its style and color).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextFormat {
+    /// Typeface, size and weight; `None`: the default style.
+    pub style: Option<TextStyle>,
+    /// Slanted (the font's italic, or an oblique version of it).
+    pub italic: bool,
+    /// Text color; `None`: the default color.
+    pub color: Option<Color>,
+    /// Highlight behind the text.
+    pub background: Option<Color>,
+    /// A line under the text.
+    pub underline: bool,
+    /// A line through the text.
+    pub strikethrough: bool,
+    /// A URL the section links to (see `rustroke_widgets::Label::rich`).
+    pub link: Option<String>,
+}
+
+impl TextFormat {
+    /// The default format.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// With typeface, size and weight `style`.
+    pub fn style(mut self, style: TextStyle) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    /// With color `color`.
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    /// Italic.
+    pub fn italic(mut self) -> Self {
+        self.italic = true;
+        self
+    }
+
+    /// Underlined.
+    pub fn underline(mut self) -> Self {
+        self.underline = true;
+        self
+    }
+
+    /// Struck through.
+    pub fn strikethrough(mut self) -> Self {
+        self.strikethrough = true;
+        self
+    }
+
+    /// With a highlight of color `color` behind it.
+    pub fn background(mut self, color: Color) -> Self {
+        self.background = Some(color);
+        self
+    }
+
+    /// Linking to `url`.
+    pub fn link(mut self, url: impl Into<String>) -> Self {
+        self.link = Some(url.into());
+        self
+    }
+
+    fn hash_into(&self, state: &mut impl Hasher) {
+        match &self.style {
+            Some(style) => {
+                1u8.hash(state);
+                style.hash_into(state);
+            }
+            None => 0u8.hash(state),
+        }
+        self.italic.hash(state);
+        for c in [self.color, self.background] {
+            c.map(|c| [c.r, c.g, c.b, c.a].map(f32::to_bits))
+                .hash(state);
+        }
+        self.underline.hash(state);
+        self.strikethrough.hash(state);
+        self.link.hash(state);
+    }
+}
+
+/// Text made of sections with different formats ("rich text"): bold
+/// words, colored parts, links. Build it with [`LayoutJob::append`] and
+/// lay it out with [`Fonts::layout_job`].
+///
+/// ```
+/// use rustroke_text::{LayoutJob, TextFormat, TextStyle};
+/// let mut job = LayoutJob::default();
+/// job.append("Press ", TextFormat::new());
+/// job.append("Save", TextFormat::new().style(TextStyle::proportional(14.0).bold()));
+/// job.append(" to keep your changes.", TextFormat::new().italic());
+/// assert_eq!(job.text, "Press Save to keep your changes.");
+/// ```
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LayoutJob {
+    /// All the text.
+    pub text: String,
+    /// Consecutive sections: byte ranges of `text` and their format.
+    pub sections: Vec<(std::ops::Range<usize>, TextFormat)>,
+}
+
+impl LayoutJob {
+    /// Text in a single format.
+    pub fn simple(text: impl Into<String>, format: TextFormat) -> Self {
+        let mut job = Self::default();
+        job.append(&text.into(), format);
+        job
+    }
+
+    /// Adds `text` in `format` at the end.
+    pub fn append(&mut self, text: &str, format: TextFormat) {
+        let start = self.text.len();
+        self.text.push_str(text);
+        self.sections.push((start..self.text.len(), format));
+    }
+
+    /// Whether any section is a link.
+    pub fn has_links(&self) -> bool {
+        self.sections.iter().any(|(_, f)| f.link.is_some())
+    }
+
+    fn hash_into(&self, state: &mut impl Hasher) {
+        self.text.hash(state);
+        for (range, format) in &self.sections {
+            range.hash(state);
+            format.hash_into(state);
+        }
     }
 }
 
@@ -268,6 +408,7 @@ impl Fonts {
     ) -> Arc<Galley> {
         let key = {
             let mut h = self.hasher.build_hasher();
+            0u8.hash(&mut h);
             text.hash(&mut h);
             style.hash_into(&mut h);
             wrap_width.map(f32::to_bits).hash(&mut h);
@@ -278,7 +419,45 @@ impl Fonts {
             *last_used = self.frame;
             return Arc::clone(galley);
         }
-        let galley = Arc::new(self.layout_uncached(text, style, wrap_width, pixels_per_point));
+        let spans = [(0..text.len(), TextFormat::default())];
+        let galley =
+            Arc::new(self.layout_uncached(text, &spans, style, wrap_width, pixels_per_point));
+        self.galleys.insert(key, (Arc::clone(&galley), self.frame));
+        galley
+    }
+
+    /// Lays out rich text: like [`Fonts::layout`], with each section of
+    /// `job` in its own format; sections without a style use `style`.
+    /// The galley's glyphs carry the sections' colors, its decorations
+    /// the backgrounds and lines, and [`Galley::sections`] where each
+    /// section is (section indices are those of `job.sections`).
+    pub fn layout_job(
+        &mut self,
+        job: &LayoutJob,
+        style: &TextStyle,
+        wrap_width: Option<f32>,
+        pixels_per_point: f32,
+    ) -> Arc<Galley> {
+        let key = {
+            let mut h = self.hasher.build_hasher();
+            1u8.hash(&mut h);
+            job.hash_into(&mut h);
+            style.hash_into(&mut h);
+            wrap_width.map(f32::to_bits).hash(&mut h);
+            pixels_per_point.to_bits().hash(&mut h);
+            h.finish()
+        };
+        if let Some((galley, last_used)) = self.galleys.get_mut(&key) {
+            *last_used = self.frame;
+            return Arc::clone(galley);
+        }
+        let galley = Arc::new(self.layout_uncached(
+            &job.text,
+            &job.sections,
+            style,
+            wrap_width,
+            pixels_per_point,
+        ));
         self.galleys.insert(key, (Arc::clone(&galley), self.frame));
         galley
     }
@@ -286,6 +465,7 @@ impl Fonts {
     fn layout_uncached(
         &mut self,
         text: &str,
+        sections: &[(std::ops::Range<usize>, TextFormat)],
         style: &TextStyle,
         wrap_width: Option<f32>,
         pixels_per_point: f32,
@@ -293,15 +473,17 @@ impl Fonts {
         let line_height = style.size * style.line_height;
         let mut buffer = Buffer::new(&mut self.system, Metrics::new(style.size, line_height));
         buffer.set_size(wrap_width, None);
-        let family = match &style.family {
-            FontFamily::Proportional => Family::Name(PROPORTIONAL_FAMILY),
-            FontFamily::System => Family::Name(&self.system_family),
-            FontFamily::Monospace => Family::Monospace,
-            FontFamily::Name(name) => Family::Name(name),
-        };
-        let weight = Weight(style.effective_weight());
-        let attrs = Attrs::new().family(family).weight(weight);
-        buffer.set_text(text, &attrs, Shaping::Advanced, None);
+        let system_family = self.system_family.clone();
+        let attrs_of = |index: usize, format| attrs_for(index, format, style, &system_family);
+        let plain = TextFormat::default();
+        let default_attrs = attrs_of(usize::MAX, &plain);
+        let spans: Vec<(&str, Attrs<'_>)> = sections
+            .iter()
+            .enumerate()
+            .filter(|(_, (r, _))| !r.is_empty())
+            .map(|(i, (r, f))| (&text[r.clone()], attrs_of(i, f)))
+            .collect();
+        buffer.set_rich_text(spans, &default_attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.system, false);
 
         // cosmic-text numbers bytes from the start of each paragraph
@@ -312,11 +494,17 @@ impl Fonts {
 
         // Collect first: rasterizing needs `self` mutably.
         let mut width: f32 = 0.0;
+        let mut height: f32 = 0.0;
         let mut line_count = 0;
+        let mut any_rtl = false;
         let mut placed = Vec::new();
         let mut rows = Vec::new();
+        let mut decorations = Vec::new();
+        let mut section_rects: Vec<(usize, Rect)> = Vec::new();
         for run in buffer.layout_runs() {
             width = width.max(run.line_w);
+            height = height.max(run.line_top + run.line_height);
+            any_rtl |= run.rtl;
             line_count += 1;
             let base = paragraph_starts
                 .get(run.line_i)
@@ -327,8 +515,63 @@ impl Fonts {
                 // Offsets passed to `physical` are in pixels, after scaling.
                 let physical =
                     glyph.physical((0.0, run.line_y * pixels_per_point), pixels_per_point);
-                placed.push(physical);
+                let format = sections.get(glyph.metadata).map(|(_, f)| f);
+                placed.push((physical, format.and_then(|f| f.color)));
+                let Some(format) = format else { continue };
+                // Areas of the sections, merged along the row.
+                let area = Rect::from_min_max(
+                    Point::new(glyph.x, run.line_top),
+                    Point::new(glyph.x + glyph.w, run.line_top + run.line_height),
+                );
+                match section_rects.last_mut() {
+                    Some((i, r)) if *i == glyph.metadata && (r.min.y - area.min.y).abs() < 0.01 => {
+                        *r = r.union(area);
+                    }
+                    _ => section_rects.push((glyph.metadata, area)),
+                }
+                let size = glyph.font_size;
+                let thickness = (size / 14.0).max(1.0 / pixels_per_point);
+                let x = (glyph.x, glyph.x + glyph.w);
+                let line =
+                    |y: f32| Rect::from_min_max(Point::new(x.0, y), Point::new(x.1, y + thickness));
+                if let Some(bg) = format.background {
+                    decorations.push(GalleyDecoration {
+                        rect: area,
+                        color: Some(bg),
+                        behind: true,
+                    });
+                }
+                if format.underline {
+                    decorations.push(GalleyDecoration {
+                        rect: line(run.line_y + size * 0.12),
+                        color: format.color,
+                        behind: false,
+                    });
+                }
+                if format.strikethrough {
+                    decorations.push(GalleyDecoration {
+                        rect: line(run.line_y - size * 0.3),
+                        color: format.color,
+                        behind: false,
+                    });
+                }
             }
+        }
+        merge_decorations(&mut decorations);
+        // Rich text has no line for an empty last paragraph (text ending
+        // with a newline); the cursor still needs one.
+        if text.ends_with('\n')
+            && let Some(last) = rows.last()
+            && last.end() < text.len()
+        {
+            let top = last.top + last.height;
+            rows.push(GalleyRow {
+                top,
+                height: line_height,
+                carets: vec![(text.len(), 0.0)],
+            });
+            height = height.max(top + line_height);
+            line_count += 1;
         }
         let line_count = line_count.max(1);
         if rows.is_empty() {
@@ -337,26 +580,35 @@ impl Fonts {
                 height: line_height,
                 carets: vec![(0, 0.0)],
             });
+            height = line_height;
+        }
+        // Right-to-left paragraphs are aligned to the right of the wrap
+        // width: the galley spans it, so they stay inside.
+        if any_rtl && let Some(w) = wrap_width {
+            width = width.max(w);
         }
 
         let glyphs = placed
             .into_iter()
-            .filter_map(|p| {
+            .filter_map(|(p, color)| {
                 let cached = self.glyph(p.cache_key)?;
                 Some(GlyphQuad {
                     offset_px: [p.x + cached.left, p.y - cached.top],
                     region: cached.region,
                     colored: cached.colored,
+                    color,
                 })
             })
             .collect();
 
         Galley {
-            size: Vec2::new(width, line_count as f32 * line_height),
+            size: Vec2::new(width, height),
             line_count,
             pixels_per_point,
             glyphs,
             rows,
+            decorations,
+            sections: section_rects,
         }
     }
 
@@ -459,6 +711,54 @@ fn row_carets(base: usize, run: &cosmic_text::LayoutRun<'_>) -> GalleyRow {
         height: run.line_height,
         carets,
     }
+}
+
+/// cosmic-text attributes for section `index` in `format`, with `style`
+/// for what the format leaves unset.
+fn attrs_for<'a>(
+    index: usize,
+    format: &'a TextFormat,
+    style: &'a TextStyle,
+    system_family: &'a str,
+) -> Attrs<'a> {
+    let s = format.style.as_ref().unwrap_or(style);
+    let family = match &s.family {
+        FontFamily::Proportional => Family::Name(PROPORTIONAL_FAMILY),
+        FontFamily::System => Family::Name(system_family),
+        FontFamily::Monospace => Family::Monospace,
+        FontFamily::Name(name) => Family::Name(name),
+    };
+    let mut attrs = Attrs::new()
+        .family(family)
+        .weight(Weight(s.effective_weight()))
+        .metadata(index);
+    if format.italic {
+        attrs = attrs.style(Style::Italic);
+    }
+    if format.style.is_some() {
+        attrs = attrs.metrics(Metrics::new(s.size, s.size * s.line_height));
+    }
+    attrs
+}
+
+/// Joins decorations of consecutive glyphs into one rectangle each, so
+/// underlines have no seams.
+fn merge_decorations(decorations: &mut Vec<GalleyDecoration>) {
+    let mut merged: Vec<GalleyDecoration> = Vec::with_capacity(decorations.len());
+    for d in decorations.drain(..) {
+        if let Some(last) = merged.iter_mut().rev().take(3).find(|m| {
+            m.behind == d.behind
+                && m.color == d.color
+                && m.rect.min.y == d.rect.min.y
+                && m.rect.max.y == d.rect.max.y
+                && (m.rect.max.x - d.rect.min.x).abs() < 0.5
+        }) {
+            last.rect = last.rect.union(d.rect);
+        } else {
+            merged.push(d);
+        }
+    }
+    *decorations = merged;
 }
 
 fn load_bundled(db: &mut cosmic_text::fontdb::Database) {
@@ -674,5 +974,59 @@ mod tests {
         assert_eq!(coverage_texel(255), [255; 4]);
         // 50% coverage must be stored as sRGB 188 (≈ linear 0.5).
         assert_eq!(coverage_texel(128), [188, 188, 188, 128]);
+    }
+
+    #[test]
+    fn rich_text_has_colors_decorations_and_sections() {
+        let mut fonts = fonts();
+        let red = Color::from_srgb8(255, 0, 0);
+        let mut job = LayoutJob::default();
+        job.append("plain ", TextFormat::new());
+        job.append("red", TextFormat::new().color(red).underline());
+        job.append(
+            " big",
+            TextFormat::new().style(TextStyle::proportional(28.0)),
+        );
+        job.append(
+            " link",
+            TextFormat::new()
+                .link("https://example.com")
+                .background(red),
+        );
+        let style = TextStyle::proportional(14.0);
+        let g = fonts.layout_job(&job, &style, None, 1.0);
+        assert!(g.glyphs.iter().any(|q| q.color == Some(red)));
+        assert!(g.glyphs.iter().any(|q| q.color.is_none()));
+        // One underline (merged across the glyphs) and one background.
+        assert_eq!(g.decorations.iter().filter(|d| !d.behind).count(), 1);
+        assert_eq!(g.decorations.iter().filter(|d| d.behind).count(), 1);
+        // The big section makes the line taller than plain text.
+        let plain = fonts.layout("plain", &style, None, 1.0);
+        assert!(g.size.y > plain.size.y * 1.5);
+        // Sections can be found by position, in order along the line.
+        let x_of = |i: usize| g.sections.iter().find(|(s, _)| *s == i).unwrap().1;
+        assert!(x_of(0).max.x <= x_of(1).min.x + 0.5);
+        let link = x_of(3);
+        assert_eq!(g.section_at(link.center()), Some(3));
+        assert!(job.has_links());
+    }
+
+    #[test]
+    fn right_to_left_text_is_right_aligned_and_selectable() {
+        let mut fonts = fonts();
+        let style = TextStyle::proportional(14.0);
+        let g = fonts.layout("שלום", &style, Some(300.0), 1.0);
+        assert_eq!(g.size.x, 300.0, "spans the wrap width");
+        let row = &g.rows[0];
+        // The first character is on the right.
+        assert!(row.x_of(0) > row.x_of("שלום".len()));
+        let sel = g.selection_rects(0, "של".len());
+        assert_eq!(sel.len(), 1);
+        assert!(sel[0].width() > 1.0);
+        assert!(
+            sel[0].max.x > 250.0,
+            "the selection is on the right: {:?}",
+            sel[0]
+        );
     }
 }

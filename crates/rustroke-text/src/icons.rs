@@ -189,12 +189,14 @@ impl Fonts {
                     offset_px: [0, 0],
                     region,
                     colored: layer == IconLayer::Original,
+                    color: None,
                 }],
                 rows: vec![GalleyRow {
                     top: 0.0,
                     height: h as f32 / pixels_per_point,
                     carets: vec![(0, 0.0)],
                 }],
+                ..Default::default()
             };
             out.push((layer, Arc::new(galley)));
         }

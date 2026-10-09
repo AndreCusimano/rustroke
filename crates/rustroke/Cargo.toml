@@ -25,6 +25,8 @@ image = { workspace = true, optional = true }
 default = ["image"]
 ## Load PNG and JPEG files with `rustroke::load_image`.
 image = ["dep:image"]
+## Render Markdown with `Markdown` / `Ui::markdown`.
+markdown = ["rustroke-widgets/markdown"]
 
 [dev-dependencies]
 env_logger.workspace = true
@@ -33,3 +35,10 @@ log.workspace = true
 rfd = "0.17"
 # Blocking on wgpu setup in the `integration` example.
 pollster.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[[example]]
+name = "rich_text"
+required-features = ["markdown"]
