@@ -144,7 +144,13 @@ pub fn notify(title: &str, body: &str) -> std::io::Result<()> {
 }
 
 /// The text form of a shortcut for the system menu ("CmdOrCtrl+Shift+S").
-#[cfg_attr(not(any(feature = "native-menu", feature = "tray")), allow(dead_code))]
+#[cfg_attr(
+    not(all(
+        any(feature = "native-menu", feature = "tray"),
+        any(target_os = "macos", target_os = "windows")
+    )),
+    allow(dead_code)
+)]
 pub(crate) fn accelerator(shortcut: &KeyboardShortcut) -> Option<String> {
     let m = shortcut.modifiers;
     let mut parts = Vec::new();
