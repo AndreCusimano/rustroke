@@ -492,6 +492,40 @@ pub enum Event {
     Paste(String),
     /// Input method (IME) composition, for accented and Asian text.
     Ime(ImeEvent),
+    /// A file from the system is being dragged over the window.
+    FileHovered(std::path::PathBuf),
+    /// The file being dragged left the window or the drag was cancelled.
+    FileHoverCancelled,
+    /// A file from the system was dropped on the window.
+    FileDropped(std::path::PathBuf),
+    /// A pinch gesture (trackpad, touch screen): the zoom factor it asks
+    /// for (above 1 zooms in).
+    Zoom(f32),
+    /// A two-finger rotation gesture, in radians (clockwise on screen).
+    Rotate(f32),
+    /// A finger touched, moved on or left a touch screen. The first finger
+    /// also moves the pointer and presses its primary button.
+    Touch {
+        /// Identifies the finger while it touches.
+        id: u64,
+        /// What happened.
+        phase: TouchPhase,
+        /// Where, in points.
+        pos: Point,
+    },
+}
+
+/// What happened to a finger on a touch screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TouchPhase {
+    /// It touched the screen.
+    Started,
+    /// It moved.
+    Moved,
+    /// It left the screen.
+    Ended,
+    /// The system took the touch over (e.g. for a gesture).
+    Cancelled,
 }
 
 /// Input method (IME) events: while composing, the text in progress is
@@ -640,6 +674,14 @@ pub struct InputState {
     pub window_focused: bool,
     /// Key presses this frame (including auto-repeat), in order.
     keys_pressed: Vec<(Key, Modifiers)>,
+    /// Files from the system being dragged over the window.
+    pub hovered_files: Vec<std::path::PathBuf>,
+    /// Files dropped on the window this frame.
+    pub dropped_files: Vec<std::path::PathBuf>,
+    /// Zoom asked by pinch gestures this frame (1: none; above 1: in).
+    pub zoom_delta: f32,
+    /// Rotation asked by gestures this frame, in radians.
+    pub rotation_delta: f32,
     /// All raw events of this frame, e.g. for text input.
     pub events: Vec<Event>,
 }
@@ -657,6 +699,10 @@ impl Default for InputState {
             scroll_delta: Vec2::ZERO,
             window_focused: true,
             keys_pressed: Vec::new(),
+            hovered_files: Vec::new(),
+            dropped_files: Vec::new(),
+            zoom_delta: 1.0,
+            rotation_delta: 0.0,
             events: Vec::new(),
         }
     }
@@ -672,6 +718,9 @@ impl InputState {
         pointer.released_at = [None; PointerButton::COUNT];
         self.keys_pressed.clear();
         self.scroll_delta = Vec2::ZERO;
+        self.dropped_files.clear();
+        self.zoom_delta = 1.0;
+        self.rotation_delta = 0.0;
 
         for event in &raw.events {
             match event {
@@ -718,7 +767,24 @@ impl InputState {
                         self.keys_pressed.push((*key, *modifiers));
                     }
                 }
-                Event::Text(_) | Event::Copy | Event::Cut | Event::Paste(_) | Event::Ime(_) => {}
+                Event::Text(_)
+                | Event::Copy
+                | Event::Cut
+                | Event::Paste(_)
+                | Event::Ime(_)
+                | Event::Touch { .. } => {}
+                Event::FileHovered(path) => {
+                    if !self.hovered_files.contains(path) {
+                        self.hovered_files.push(path.clone());
+                    }
+                }
+                Event::FileHoverCancelled => self.hovered_files.clear(),
+                Event::FileDropped(path) => {
+                    self.hovered_files.clear();
+                    self.dropped_files.push(path.clone());
+                }
+                Event::Zoom(factor) => self.zoom_delta *= factor,
+                Event::Rotate(angle) => self.rotation_delta += angle,
                 Event::WindowFocused(focused) => {
                     self.window_focused = *focused;
                     if !focused {

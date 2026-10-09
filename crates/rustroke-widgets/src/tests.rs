@@ -3649,3 +3649,56 @@ fn ui_state_survives_save_and_load() {
     assert_eq!(after.1.min, before.1.min, "window position");
     assert!(after.2, "section still open");
 }
+
+#[test]
+fn drag_and_drop_moves_a_payload_between_zones() {
+    let mut h = Harness::new();
+    let mut columns = [vec!["apple", "pear"], vec![]];
+    let run = |h: &mut Harness, events, columns: &mut [Vec<&'static str>; 2]| {
+        let mut zones = [Rect::NOTHING; 2];
+        let mut moved = None;
+        h.frame(events, |ui| {
+            ui.horizontal(|ui| {
+                for (c, column) in columns.iter().enumerate() {
+                    let (zone, dropped) = ui.dnd_drop_zone::<(usize, usize), _>(|ui| {
+                        ui.vertical(|ui| {
+                            ui.add_sized(
+                                vec2(120.0, 10.0),
+                                crate::Label::new(format!("Column {c}")),
+                            );
+                            for (i, item) in column.iter().enumerate() {
+                                ui.dnd_drag_source(crate::Id::new(*item), (c, i), |ui| {
+                                    ui.label(*item);
+                                });
+                            }
+                        });
+                    });
+                    zones[c] = zone.response.rect;
+                    if let Some(from) = dropped {
+                        moved = Some((*from, c));
+                    }
+                }
+            });
+        });
+        if let Some(((from_col, i), to)) = moved {
+            let item = columns[from_col].remove(i);
+            columns[to].push(item);
+        }
+        zones
+    };
+    run(&mut h, vec![], &mut columns);
+    let zones = run(&mut h, vec![], &mut columns);
+    let pear = h.ctx.find_widget("pear").unwrap().rect.center();
+    run(
+        &mut h,
+        vec![move_to(pear), button(pear, true)],
+        &mut columns,
+    );
+    let target = zones[1].center();
+    run(&mut h, vec![move_to(pear + vec2(10.0, 0.0))], &mut columns);
+    assert!(h.ctx.is_dnd_active());
+    run(&mut h, vec![move_to(target)], &mut columns);
+    run(&mut h, vec![button(target, false)], &mut columns);
+    assert!(!h.ctx.is_dnd_active());
+    assert_eq!(columns, [vec!["apple"], vec!["pear"]]);
+}

@@ -27,10 +27,21 @@ rustroke-text.workspace = true
 rustroke-widgets.workspace = true
 serde_json = { workspace = true, optional = true }
 
+# Native menu bar (macOS) and tray icon (macOS, Windows); tray-icon
+# re-exports the `muda` menus.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tray-icon = { version = "0.26", default-features = false, optional = true }
+
 [features]
 ## Save UI state, the window's position and size, and app values between
 ## runs (see `WindowOptions::persistence_id`).
 persistence = ["rustroke-widgets/persistence", "dep:serde_json"]
+## The macOS menu bar from `Frame::set_native_menu` (no effect elsewhere).
+## Needs Rust 1.90 (tray-icon/muda).
+native-menu = ["dep:tray-icon"]
+## An icon in the system tray / menu bar extras (macOS, Windows).
+## Needs Rust 1.90 (tray-icon/muda).
+tray = ["dep:tray-icon"]
 
 [package.metadata.docs.rs]
 all-features = true

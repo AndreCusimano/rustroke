@@ -748,6 +748,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98b0cc327b5bc766e7fda9c9260cc0fa81b43a8e240440422dff70788e3f9ef1"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1437,6 +1446,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyboard-types"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
+dependencies = [
+ "bitflags 2.13.2",
+ "serde",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1593,6 +1612,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "muda"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
+dependencies = [
+ "crossbeam-channel",
+ "dpi",
+ "keyboard-types",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "png",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "naga"
 version = "30.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1742,6 +1779,7 @@ dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
  "objc2 0.6.5",
+ "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
 ]
@@ -1856,6 +1894,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "objc2 0.6.5",
  "objc2-core-foundation",
 ]
@@ -2547,7 +2586,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "env_logger",
  "image",
@@ -2562,11 +2601,11 @@ dependencies = [
 
 [[package]]
 name = "rustroke-core"
-version = "0.13.0"
+version = "0.14.0"
 
 [[package]]
 name = "rustroke-render"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bytemuck",
  "log",
@@ -2580,7 +2619,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke-text"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "cosmic-text",
  "log",
@@ -2590,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke-widgets"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "accesskit",
  "pulldown-cmark",
@@ -2602,7 +2641,7 @@ dependencies = [
 
 [[package]]
 name = "rustroke-winit"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -2615,6 +2654,7 @@ dependencies = [
  "rustroke-text",
  "rustroke-widgets",
  "serde_json",
+ "tray-icon",
  "winit",
 ]
 
@@ -3121,6 +3161,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "tray-icon"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f5cc5858ecf9574ddd8f0032a2ff7ffd6f7724d2b81e48b9374984b3fd6ddc9"
+dependencies = [
+ "crossbeam-channel",
+ "muda",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "once_cell",
+ "png",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

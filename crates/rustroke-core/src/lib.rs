@@ -19,7 +19,7 @@ pub use galley::{Galley, GalleyDecoration, GalleyRow, GlyphQuad};
 pub use geometry::{PhysicalSize, Point, Rect, Vec2, point, vec2};
 pub use input::{
     Event, ImeEvent, InputState, Key, KeyboardShortcut, Modifiers, POINTS_PER_SCROLL_LINE,
-    PointerButton, RawInput,
+    PointerButton, RawInput, TouchPhase,
 };
 pub use paint::{
     Gradient, GradientKind, Shadow, Transform, cubic_bezier_points, dashes, quadratic_bezier_points,

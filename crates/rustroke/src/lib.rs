@@ -141,6 +141,13 @@
 //!   [`Frame::close`] closes it once answered. On macOS,
 //!   [`WindowOptions::unified_titlebar`] lets the app draw its own top bar
 //!   next to the window buttons.
+//! - **Drag and drop**: [`Ui::dnd_drag_source`] and [`Ui::dnd_drop_zone`]
+//!   move payloads of any type between widgets; files dropped from the
+//!   system arrive in [`InputState::dropped_files`]; pinch and rotation
+//!   gestures in [`InputState::zoom_delta`] and `rotation_delta`.
+//! - **Platform**: a macOS menu bar ([`Frame::set_native_menu`], feature
+//!   `native-menu`), a tray icon ([`Frame::set_tray`], feature `tray`) and
+//!   system notifications ([`notify`]).
 //! - **More windows**: keep extra native windows open with
 //!   [`Frame::show_window`] (e.g. a view on a second monitor) and draw
 //!   them in [`App::update_window`].
@@ -160,6 +167,7 @@
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
 //! `table`, `rich_text` with `--features markdown`, `graphics`,
+//! `platform` with `--features native-menu,tray`,
 //! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
@@ -197,8 +205,8 @@ pub use rustroke_widgets::{
 #[cfg(feature = "markdown")]
 pub use rustroke_widgets::{ImageLoader, Markdown};
 pub use rustroke_winit::{
-    App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,
-    WindowOptions, accesskit, run, testing, wgpu, winit,
+    App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, NativeMenu, NativeMenuItem,
+    RunError, RunOutput, TrayOptions, WindowOptions, accesskit, notify, run, testing, wgpu, winit,
 };
 
 /// Decodes a PNG or JPEG file (already read into memory) into an image

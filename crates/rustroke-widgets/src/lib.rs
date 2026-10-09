@@ -20,6 +20,7 @@ mod collapsing;
 mod combo_box;
 mod containers;
 mod context;
+mod dnd;
 mod dock;
 mod drag_value;
 mod grid;

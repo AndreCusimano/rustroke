@@ -125,6 +125,10 @@ fn main() -> Result<(), rustroke::RunError> {
 - **Your own GPU rendering**: render a 3D viewport (or anything) with wgpu
   into your own texture and show it in the UI without copies, or draw with
   your own shaders inside the UI's render pass (paint callbacks).
+- **Drag and drop and platform**: drag payloads between widgets, files
+  dropped from the system, pinch/rotate gestures and touch, a macOS menu
+  bar and a tray icon (optional `native-menu` and `tray` features), system
+  notifications.
 - **More windows**: extra native windows (e.g. a view on a second monitor),
   sharing the app's state. On macOS the app can draw its own top bar next
   to the window buttons (unified title bar).
@@ -166,6 +170,7 @@ cargo run -p rustroke --example containers  # menus, panels, windows, scroll are
 cargo run -p rustroke --example table       # 100 000-row table and a large tree
 cargo run -p rustroke --example rich_text --features markdown   # rich text, Markdown, right-to-left
 cargo run -p rustroke --example graphics    # gradients, shadows, curves, transforms, animation
+cargo run -p rustroke --example platform --features native-menu,tray   # drag and drop, files, menu bar, tray
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
 cargo run -p rustroke --example themes      # live theme editor
 cargo run -p rustroke --example extras      # images, disabled widgets, accessibility

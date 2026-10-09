@@ -232,6 +232,8 @@ impl Integration {
             close: false,
             titlebar_height: 0.0,
             storage: &mut self.storage,
+            platform: Default::default(),
+            platform_events: Default::default(),
         };
         add(&mut frame);
         rustroke_widgets::show_inspector(&mut frame);

@@ -2,6 +2,7 @@
 
 mod input;
 mod integration;
+mod native;
 pub mod testing;
 
 use std::fmt;
@@ -19,6 +20,7 @@ pub use accesskit;
 /// The wgpu version rustroke uses (for [`Frame::wgpu`] and native textures):
 /// use these types so the application and rustroke share one GPU device.
 pub use integration::{EventResponse, Integration, RunOutput};
+pub use native::{NativeMenu, NativeMenuItem, TrayOptions, notify};
 pub use rustroke_render::{CallbackFn, CallbackInfo, wgpu};
 use rustroke_text::{Fonts, TextStyle};
 use rustroke_widgets::{
@@ -101,6 +103,24 @@ pub struct Frame<'a> {
     titlebar_height: f32,
     /// App values kept between runs (see [`Frame::set_value`]).
     storage: &'a mut std::collections::BTreeMap<String, String>,
+    /// Native menu bar and tray icon asked for this frame.
+    platform: PlatformRequests,
+    /// Native menu choices and tray clicks since the last frame.
+    platform_events: PlatformEvents,
+}
+
+/// What a frame asked of the platform (menus, tray icon).
+#[derive(Clone, Debug, Default)]
+struct PlatformRequests {
+    menu: Option<Vec<NativeMenu>>,
+    tray: Option<Option<TrayOptions>>,
+}
+
+/// Native menu choices and tray clicks for a frame.
+#[derive(Clone, Debug, Default)]
+struct PlatformEvents {
+    menu: Vec<String>,
+    tray_clicked: bool,
 }
 
 impl Frame<'_> {
@@ -144,6 +164,35 @@ impl Frame<'_> {
     /// feature, saves it for the next run.
     pub fn set_value(&mut self, key: impl Into<String>, value: impl Into<String>) {
         self.storage.insert(key.into(), value.into());
+    }
+
+    /// Shows `menus` in the native menu bar (macOS, with the
+    /// `native-menu` feature; after an application menu with About, Hide
+    /// and Quit). Call it every frame, or whenever the menus change: they
+    /// are rebuilt only when different. Choices arrive in
+    /// [`Frame::native_menu_events`]. Elsewhere it does nothing, so draw
+    /// your own menu bar there (`ui.menu_button`).
+    pub fn set_native_menu(&mut self, menus: Vec<NativeMenu>) {
+        self.platform.menu = Some(menus);
+    }
+
+    /// Shows (or with `None` removes) an icon in the system tray (macOS,
+    /// Windows; feature `tray`). Its menu's choices arrive in
+    /// [`Frame::native_menu_events`]; clicks on the icon in
+    /// [`Frame::tray_clicked`].
+    pub fn set_tray(&mut self, tray: Option<TrayOptions>) {
+        self.platform.tray = Some(tray);
+    }
+
+    /// The ids of the native menu and tray menu entries chosen since the
+    /// last frame.
+    pub fn native_menu_events(&self) -> &[String] {
+        &self.platform_events.menu
+    }
+
+    /// Whether the tray icon was clicked since the last frame.
+    pub fn tray_clicked(&self) -> bool {
+        self.platform_events.tray_clicked
     }
 
     /// Whether [`Frame::close`] was called this frame.
@@ -385,6 +434,11 @@ pub fn run(options: WindowOptions, app: impl App) -> Result<(), RunError> {
         storage: std::collections::BTreeMap::new(),
         restored_ui: None,
         restored_position: None,
+        #[cfg(all(
+            any(feature = "native-menu", feature = "tray"),
+            any(target_os = "macos", target_os = "windows")
+        ))]
+        native: Default::default(),
     };
     #[cfg(feature = "persistence")]
     persistence::restore(&mut runner);
@@ -414,6 +468,12 @@ struct Runner<A> {
     restored_ui: Option<String>,
     /// Saved position of the main window, in logical pixels.
     restored_position: Option<(f64, f64)>,
+    /// The native menu bar and tray icon.
+    #[cfg(all(
+        any(feature = "native-menu", feature = "tray"),
+        any(target_os = "macos", target_os = "windows")
+    ))]
+    native: native::platform::Native,
 }
 
 /// One native window with its own UI state and renderer.
@@ -509,10 +569,11 @@ impl WindowState {
         &mut self,
         fonts: &mut Fonts,
         storage: &mut std::collections::BTreeMap<String, String>,
+        platform_events: PlatformEvents,
         start: Instant,
         window_id: Option<Id>,
         update: impl FnOnce(&mut Frame<'_>),
-    ) -> (Vec<(Id, WindowOptions)>, bool, bool) {
+    ) -> (Vec<(Id, WindowOptions)>, bool, bool, PlatformRequests) {
         // Window scale factors are small values like 1.0, 1.5 or 2.0.
         #[allow(clippy::cast_possible_truncation)]
         let pixels_per_point = self.window.scale_factor() as f32 * self.ctx.zoom_factor();
@@ -551,6 +612,8 @@ impl WindowState {
             close: false,
             titlebar_height: self.titlebar_height,
             storage,
+            platform: PlatformRequests::default(),
+            platform_events,
         };
         update(&mut frame);
         rustroke_widgets::show_inspector(&mut frame);
@@ -561,6 +624,7 @@ impl WindowState {
             title,
             windows,
             close,
+            platform,
             ..
         } = frame;
         if let Some(title) = title
@@ -617,7 +681,7 @@ impl WindowState {
         if outcome == RenderOutcome::Retry || request_repaint || output.repaint {
             self.window.request_redraw();
         }
-        (windows, had_input, close)
+        (windows, had_input, close, platform)
     }
 
     fn on_accesskit(&mut self, event: accesskit_winit::WindowEvent) {
@@ -672,8 +736,51 @@ impl<A: App> Runner<A> {
         } = self;
         let had_input;
         if let Some(main) = self.main.as_mut().filter(|m| m.window.id() == window) {
-            let (requested, input, close) =
-                main.redraw(fonts, storage, *start, None, |frame| app.update(frame));
+            #[cfg(all(
+                any(feature = "native-menu", feature = "tray"),
+                any(target_os = "macos", target_os = "windows")
+            ))]
+            let events = {
+                let e = self.native.take_events();
+                PlatformEvents {
+                    menu: e.menu,
+                    tray_clicked: e.tray_clicked,
+                }
+            };
+            #[cfg(not(all(
+                any(feature = "native-menu", feature = "tray"),
+                any(target_os = "macos", target_os = "windows")
+            )))]
+            let events = PlatformEvents::default();
+            let (requested, input, close, platform) =
+                main.redraw(fonts, storage, events, *start, None, |frame| {
+                    app.update(frame)
+                });
+            #[cfg(all(
+                any(feature = "native-menu", feature = "tray"),
+                any(target_os = "macos", target_os = "windows")
+            ))]
+            {
+                let proxy = std::sync::Arc::new(std::sync::Mutex::new(self.proxy.clone()));
+                let wake = move || {
+                    let proxy = proxy
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let _ = proxy.send_event(UserEvent::Repaint);
+                };
+                if let Some(menus) = &platform.menu {
+                    self.native
+                        .set_menu(menus, &self.options.title, wake.clone());
+                }
+                if let Some(tray) = &platform.tray {
+                    self.native.set_tray(tray.as_ref(), wake);
+                }
+            }
+            #[cfg(not(all(
+                any(feature = "native-menu", feature = "tray"),
+                any(target_os = "macos", target_os = "windows")
+            )))]
+            let _ = platform;
             if close {
                 event_loop.exit();
                 return;
@@ -698,9 +805,16 @@ impl<A: App> Runner<A> {
         {
             let id = *id;
             let close;
-            (_, had_input, close) = state.redraw(fonts, storage, *start, Some(id), |frame| {
-                app.update_window(id, frame);
-            });
+            (_, had_input, close, _) = state.redraw(
+                fonts,
+                storage,
+                PlatformEvents::default(),
+                *start,
+                Some(id),
+                |frame| {
+                    app.update_window(id, frame);
+                },
+            );
             if close {
                 self.extras.retain(|(k, _)| *k != id);
                 self.requested.retain(|(k, _)| *k != id);

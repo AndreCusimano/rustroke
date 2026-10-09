@@ -1,7 +1,7 @@
 //! Conversion of winit events into platform-independent [`Event`]s.
 
 use rustroke_core::{
-    Event, ImeEvent, Key, Modifiers, POINTS_PER_SCROLL_LINE, Point, PointerButton, Vec2,
+    Event, ImeEvent, Key, Modifiers, POINTS_PER_SCROLL_LINE, Point, PointerButton, TouchPhase, Vec2,
 };
 use rustroke_widgets::CursorIcon;
 use winit::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
@@ -19,6 +19,8 @@ pub(crate) struct InputCollector {
     pointer: Option<Point>,
     /// Created on first use; `None` inside if the platform has none.
     clipboard: Option<Option<arboard::Clipboard>>,
+    /// The finger that drives the pointer, while it touches.
+    pointer_touch: Option<u64>,
 }
 
 impl std::fmt::Debug for InputCollector {
@@ -85,6 +87,58 @@ impl InputCollector {
             WindowEvent::ModifiersChanged(m) => self.modifiers = modifiers(m.state()),
             WindowEvent::KeyboardInput { event, .. } => self.on_key(event),
             WindowEvent::Focused(focused) => self.events.push(Event::WindowFocused(*focused)),
+            WindowEvent::HoveredFile(path) => self.events.push(Event::FileHovered(path.clone())),
+            WindowEvent::HoveredFileCancelled => self.events.push(Event::FileHoverCancelled),
+            WindowEvent::DroppedFile(path) => self.events.push(Event::FileDropped(path.clone())),
+            WindowEvent::PinchGesture { delta, .. } if delta.is_finite() => {
+                self.events.push(Event::Zoom((1.0 + *delta) as f32));
+            }
+            WindowEvent::RotationGesture { delta, .. } if delta.is_finite() => {
+                // winit: degrees, counterclockwise; ours: radians, clockwise.
+                self.events.push(Event::Rotate(-delta.to_radians()));
+            }
+            WindowEvent::Touch(touch) => {
+                let pos = to_points(touch.location.x, touch.location.y);
+                let phase = match touch.phase {
+                    winit::event::TouchPhase::Started => TouchPhase::Started,
+                    winit::event::TouchPhase::Moved => TouchPhase::Moved,
+                    winit::event::TouchPhase::Ended => TouchPhase::Ended,
+                    winit::event::TouchPhase::Cancelled => TouchPhase::Cancelled,
+                };
+                self.events.push(Event::Touch {
+                    id: touch.id,
+                    phase,
+                    pos,
+                });
+                // The first finger acts as the mouse.
+                let button = |pressed| Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                };
+                match phase {
+                    TouchPhase::Started if self.pointer_touch.is_none() => {
+                        self.pointer_touch = Some(touch.id);
+                        self.pointer = Some(pos);
+                        self.events.push(Event::PointerMoved(pos));
+                        self.events.push(button(true));
+                    }
+                    TouchPhase::Moved if self.pointer_touch == Some(touch.id) => {
+                        self.pointer = Some(pos);
+                        self.events.push(Event::PointerMoved(pos));
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled
+                        if self.pointer_touch == Some(touch.id) =>
+                    {
+                        self.pointer_touch = None;
+                        self.events.push(button(false));
+                        self.events.push(Event::PointerGone);
+                        self.pointer = None;
+                    }
+                    _ => {}
+                }
+            }
             WindowEvent::Ime(ime) => self.events.push(Event::Ime(match ime {
                 Ime::Enabled => ImeEvent::Enabled,
                 Ime::Preedit(text, _) => ImeEvent::Preedit(text.clone()),

@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-09
+
+### Added
+
+- **Drag and drop between widgets**: `ui.dnd_drag_source(id, payload,
+  |ui| ..)` makes content draggable with a payload of any type (it
+  follows the pointer, its place stays empty); `ui.dnd_drop_zone::<T>(|ui|
+  ..)` outlines itself while a `T` is dragged and returns it when dropped
+  there. `Context::is_dnd_active`, `dnd_payload`, `take_dnd_payload`.
+- **Files from the system**: `Event::FileHovered` / `FileHoverCancelled` /
+  `FileDropped`; `InputState::hovered_files` and `dropped_files`.
+- **Gestures and touch**: `Event::Zoom` (pinch) and `Event::Rotate`
+  (`InputState::zoom_delta`, `rotation_delta`); `Event::Touch` with
+  `TouchPhase`, the first finger also acting as the mouse.
+- **Native menu bar** (macOS, feature `native-menu`):
+  `Frame::set_native_menu(vec![NativeMenu::new("File", items)])` after an
+  application menu with About, Hide and Quit; choices arrive in
+  `Frame::native_menu_events`.
+- **Tray icon** (macOS, Windows, feature `tray`): `Frame::set_tray(Some(
+  TrayOptions { icon, tooltip, menu }))`, `Frame::tray_clicked`.
+- The `native-menu` and `tray` features need Rust 1.90 (their
+  dependencies do); everything else still builds with Rust 1.89.
+- **Notifications**: `rustroke::notify(title, body)` (macOS, Windows 10+,
+  Linux with `notify-send`).
+- New `platform` example.
+
 ## [0.13.0] — 2026-10-09
 
 ### Added
@@ -482,7 +508,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/AndreCusimano/rustroke/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/AndreCusimano/rustroke/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/AndreCusimano/rustroke/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/AndreCusimano/rustroke/compare/v0.10.0...v0.11.0

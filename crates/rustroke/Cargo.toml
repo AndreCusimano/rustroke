@@ -30,6 +30,11 @@ markdown = ["rustroke-widgets/markdown"]
 ## Save UI state, the window's position and size, and app values between
 ## runs (see `WindowOptions::persistence_id`).
 persistence = ["rustroke-winit/persistence"]
+## The macOS menu bar (`Frame::set_native_menu`). Needs Rust 1.90.
+native-menu = ["rustroke-winit/native-menu"]
+## An icon in the system tray (`Frame::set_tray`; macOS, Windows). Needs
+## Rust 1.90.
+tray = ["rustroke-winit/tray"]
 
 [dev-dependencies]
 env_logger.workspace = true

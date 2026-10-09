@@ -406,6 +406,8 @@ pub struct Context {
     zoom_shortcuts: bool,
     /// The debugging inspector is shown.
     inspector_open: bool,
+    /// What is being dragged with [`Ui::dnd_drag_source`], if anything.
+    dnd: Option<DndPayload>,
     /// Shared with [`crate::Automation`] handles, once one was created.
     automation: Option<Arc<crate::automation::AutomationShared>>,
     /// State saved by [`Context::save_state`]: JSON by id.
@@ -450,6 +452,7 @@ impl Default for Context {
             zoom: 1.0,
             zoom_shortcuts: true,
             inspector_open: false,
+            dnd: None,
             automation: None,
             #[cfg(feature = "persistence")]
             persisted: HashMap::new(),
@@ -925,6 +928,11 @@ impl Context {
         if let Some(i) = self.open_submenus.iter().position(|id| !seen.contains(id)) {
             self.open_submenus.truncate(i);
         }
+        // A drag ends when the button is released (drop zones took the
+        // payload during this frame if they wanted it).
+        if self.dnd.is_some() && !self.input.pointer.primary_down() {
+            self.dnd = None;
+        }
         if !self.this_frame.hover_tracked {
             self.hover_start = None;
         }
@@ -1186,6 +1194,44 @@ impl Context {
         current
     }
 
+    // ---- Drag and drop ----
+
+    /// Whether something is being dragged with [`Ui::dnd_drag_source`].
+    pub fn is_dnd_active(&self) -> bool {
+        self.dnd.is_some()
+    }
+
+    /// The payload being dragged, if it is a `P` (e.g. to show where it
+    /// could go).
+    pub fn dnd_payload<P: Any + Send + Sync>(&self) -> Option<Arc<P>> {
+        let payload = Arc::clone(&self.dnd.as_ref()?.payload);
+        payload.downcast().ok()
+    }
+
+    /// Takes the payload being dragged if it is a `P`, ending the drag.
+    pub fn take_dnd_payload<P: Any + Send + Sync>(&mut self) -> Option<Arc<P>> {
+        let payload = self.dnd_payload::<P>()?;
+        self.dnd = None;
+        Some(payload)
+    }
+
+    pub(crate) fn dnd_source(&self) -> Option<(Id, Vec2)> {
+        self.dnd.as_ref().map(|d| (d.source, d.grab))
+    }
+
+    pub(crate) fn start_dnd(
+        &mut self,
+        source: Id,
+        payload: Arc<dyn Any + Send + Sync>,
+        grab: Vec2,
+    ) {
+        self.dnd = Some(DndPayload {
+            source,
+            payload,
+            grab,
+        });
+    }
+
     // ---- Automation ----
 
     /// A handle to drive this UI from another thread: read its widgets,
@@ -1402,6 +1448,24 @@ impl Context {
         };
         self.focused = Some(list[next]);
         self.focus_visible = true;
+    }
+}
+
+/// Something being dragged between widgets.
+#[derive(Clone)]
+struct DndPayload {
+    /// The drag source.
+    source: Id,
+    payload: Arc<dyn Any + Send + Sync>,
+    /// Pointer position relative to the source's top-left corner.
+    grab: Vec2,
+}
+
+impl std::fmt::Debug for DndPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DndPayload")
+            .field("source", &self.source)
+            .finish_non_exhaustive()
     }
 }
 

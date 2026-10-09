@@ -190,6 +190,8 @@ impl Harness {
             close: false,
             titlebar_height: 0.0,
             storage: &mut self.storage,
+            platform: Default::default(),
+            platform_events: Default::default(),
         };
         app.update(&mut frame);
         let Frame {
@@ -312,6 +314,8 @@ impl Harness {
             close: false,
             titlebar_height: 0.0,
             storage: &mut self.storage,
+            platform: Default::default(),
+            platform_events: Default::default(),
         };
         app.update_window(id, &mut frame);
         self.fonts.end_frame();
