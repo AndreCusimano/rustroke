@@ -60,6 +60,8 @@ pub struct Harness {
     window_contexts: Vec<(Id, Context)>,
     /// The last frame called [`Frame::close`].
     close_requested: bool,
+    /// App values (see [`Frame::set_value`]).
+    storage: std::collections::BTreeMap<String, String>,
 }
 
 impl std::fmt::Debug for Harness {
@@ -137,6 +139,7 @@ impl Harness {
             windows: Vec::new(),
             window_contexts: Vec::new(),
             close_requested: false,
+            storage: std::collections::BTreeMap::new(),
         }
     }
 
@@ -186,6 +189,7 @@ impl Harness {
             window_id: None,
             close: false,
             titlebar_height: 0.0,
+            storage: &mut self.storage,
         };
         app.update(&mut frame);
         let Frame {
@@ -307,6 +311,7 @@ impl Harness {
             window_id: Some(id),
             close: false,
             titlebar_height: 0.0,
+            storage: &mut self.storage,
         };
         app.update_window(id, &mut frame);
         self.fonts.end_frame();
@@ -317,6 +322,30 @@ impl Harness {
     /// The widgets of the last frame.
     pub fn widgets(&self) -> &[WidgetDescription] {
         self.ctx.widgets()
+    }
+
+    /// Builds the accessibility tree (what screen readers get) from the
+    /// next frame on, to check it with [`Harness::accesskit_tree`].
+    pub fn enable_accessibility(&mut self) {
+        self.ctx.set_accessibility_active(true);
+    }
+
+    /// The accessibility tree of the last frame, after
+    /// [`Harness::enable_accessibility`]: nodes with roles, labels,
+    /// values, states and bounds in physical pixels.
+    pub fn accesskit_tree(&self) -> Option<&accesskit::TreeUpdate> {
+        self.output.accesskit_update.as_ref()
+    }
+
+    /// The first widget of the last frame with `role` and `label`.
+    pub fn find_by_role(
+        &self,
+        role: rustroke_widgets::WidgetRole,
+        label: &str,
+    ) -> Option<&WidgetDescription> {
+        self.widgets()
+            .iter()
+            .find(|w| w.info.role == role && w.info.label == label)
     }
 
     /// The first widget of the last frame labelled `label`.
@@ -467,6 +496,56 @@ mod tests {
         assert!(app.on_close_requested());
         assert!(!h.click(&mut app, "Missing"));
         assert!(h.widgets().len() >= 3);
+    }
+
+    #[test]
+    fn accessibility_tree_and_automation_in_tests() {
+        let mut clicks = 0;
+        let mut app = |frame: &mut Frame| {
+            frame.ui(|ui| {
+                if ui.button("Count").clicked() {
+                    clicks += 1;
+                }
+                ui.checkbox(&mut true.clone(), "Option");
+            });
+        };
+        let mut h = Harness::new();
+        h.enable_accessibility();
+        h.run(&mut app);
+        let tree = h.accesskit_tree().expect("built while enabled");
+        assert!(tree.nodes.len() >= 3, "window, button, checkbox");
+        assert!(
+            h.find_by_role(rustroke_widgets::WidgetRole::Button, "Count")
+                .is_some()
+        );
+        assert!(
+            h.find_by_role(rustroke_widgets::WidgetRole::Checkbox, "Count")
+                .is_none()
+        );
+
+        // An automation handle drives the app like a remote user.
+        let robot = h.ctx().automation();
+        h.run(&mut app);
+        assert!(robot.find("Count").is_some());
+        let worker = std::thread::spawn(move || robot.click("Count"));
+        assert!(worker.join().unwrap());
+        h.run(&mut app);
+        drop(app);
+        assert_eq!(clicks, 1);
+    }
+
+    #[test]
+    fn app_values_are_kept_across_frames() {
+        let mut seen = Vec::new();
+        let mut app = |frame: &mut Frame| {
+            seen.push(frame.value("theme").map(str::to_owned));
+            frame.set_value("theme", "dark");
+        };
+        let mut h = Harness::new();
+        h.run(&mut app);
+        h.run(&mut app);
+        drop(app);
+        assert_eq!(seen, [None, Some("dark".to_owned())]);
     }
 
     /// WIN-06: after a "save changes?" dialog the app closes the window.

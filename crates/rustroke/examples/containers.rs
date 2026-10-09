@@ -4,7 +4,8 @@
 //! (File › Quit). On macOS the menu bar sits in a unified title bar,
 //! next to the window buttons.
 //!
-//! Run with: `cargo run -p rustroke --example containers`
+//! Run with: `cargo run -p rustroke --example containers` (add
+//! `--features persistence` to keep the layout between runs).
 
 use rustroke::{App, CentralPanel, Frame, Modal, Panel, ScrollArea, Slider, WindowOptions, point};
 
@@ -147,6 +148,9 @@ fn main() -> Result<(), rustroke::RunError> {
             title: "containers".to_owned(),
             inner_size: (900.0, 600.0),
             unified_titlebar: true,
+            // With `--features persistence` window positions, the panel
+            // width and the window size are restored on the next run.
+            persistence_id: Some("rustroke.containers-example".into()),
         },
         Demo {
             selected: 0,

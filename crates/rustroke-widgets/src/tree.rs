@@ -121,7 +121,7 @@ impl Tree {
             std::hash::BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
         let key = |n: N| hasher.hash_one(n);
         // Nodes whose open state differs from the default.
-        let mut toggled: HashSet<u64> = ui.ctx().data(toggled_key).unwrap_or_default();
+        let mut toggled: HashSet<u64> = ui.ctx().data_persisted(toggled_key).unwrap_or_default();
         let before_toggled = toggled.clone();
         let is_open = |n: N, depth: usize, toggled: &HashSet<u64>| {
             (depth < self.open_depth) != toggled.contains(&key(n))
@@ -317,7 +317,7 @@ impl Tree {
             tree_response.has_focus = true;
         }
         if toggled != before_toggled {
-            ui.ctx().insert_data(toggled_key, toggled);
+            ui.ctx().insert_persisted(toggled_key, toggled);
             ui.ctx().request_repaint();
         }
         let rect = area.response.rect;

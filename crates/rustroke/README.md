@@ -130,6 +130,10 @@ fn main() -> Result<(), rustroke::RunError> {
   to the window buttons (unified title bar).
 - **Your own event loop**: embed the UI in an app that already owns its
   winit window and wgpu device (`rustroke::Integration`).
+- **State and tools**: UI state, window geometry and app values saved
+  between runs (optional `persistence` feature), global zoom (Cmd/Ctrl +
+  = / - / 0), a debugging inspector (Cmd/Ctrl+Alt+I), automation from
+  another thread, and accessibility trees in headless tests.
 - **Testing**: run your app without a window, click widgets by label, type
   text, check the result and render the frame to a PNG
   (`rustroke::testing::Harness`).

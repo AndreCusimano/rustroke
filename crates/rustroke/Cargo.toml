@@ -27,6 +27,9 @@ default = ["image"]
 image = ["dep:image"]
 ## Render Markdown with `Markdown` / `Ui::markdown`.
 markdown = ["rustroke-widgets/markdown"]
+## Save UI state, the window's position and size, and app values between
+## runs (see `WindowOptions::persistence_id`).
+persistence = ["rustroke-winit/persistence"]
 
 [dev-dependencies]
 env_logger.workspace = true

@@ -106,7 +106,10 @@ impl CollapsingHeader {
         let style = ui.style();
         let id = ui.id().with(self.id_salt);
         let open_key = id.with("open");
-        let mut open = ui.ctx().data(open_key).unwrap_or(self.default_open);
+        let mut open = ui
+            .ctx()
+            .data_persisted(open_key)
+            .unwrap_or(self.default_open);
         if let Some(forced) = self.open {
             open = forced;
         }
@@ -154,7 +157,7 @@ impl CollapsingHeader {
             open = !open;
             header.mark_changed();
         }
-        ui.ctx().insert_data(open_key, open);
+        ui.ctx().insert_persisted(open_key, open);
         ui.describe(
             &header,
             WidgetInfo::new(WidgetRole::CollapsingHeader, self.text.clone()).expanded(open),

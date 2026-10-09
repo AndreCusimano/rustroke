@@ -18,10 +18,15 @@ rustroke-core.workspace = true
 rustroke-text.workspace = true
 accesskit.workspace = true
 pulldown-cmark = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [features]
 ## Render Markdown with `Markdown` / `Ui::markdown`.
 markdown = ["dep:pulldown-cmark"]
+## Save and restore UI state (window positions, panel sizes, open
+## sections, table columns...) with `Context::save_state` / `load_state`.
+persistence = ["dep:serde", "dep:serde_json"]
 
 [package.metadata.docs.rs]
 all-features = true

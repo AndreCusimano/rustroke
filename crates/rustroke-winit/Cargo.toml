@@ -25,3 +25,12 @@ rustroke-core.workspace = true
 rustroke-render.workspace = true
 rustroke-text.workspace = true
 rustroke-widgets.workspace = true
+serde_json = { workspace = true, optional = true }
+
+[features]
+## Save UI state, the window's position and size, and app values between
+## runs (see `WindowOptions::persistence_id`).
+persistence = ["rustroke-widgets/persistence", "dep:serde_json"]
+
+[package.metadata.docs.rs]
+all-features = true

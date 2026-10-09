@@ -14,6 +14,8 @@ use rustroke_core::{
 };
 use rustroke_render::{PaintJob, RenderOutcome, Renderer, RendererError};
 
+/// The AccessKit version rustroke uses (accessibility trees in tests).
+pub use accesskit;
 /// The wgpu version rustroke uses (for [`Frame::wgpu`] and native textures):
 /// use these types so the application and rustroke share one GPU device.
 pub use integration::{EventResponse, Integration, RunOutput};
@@ -43,6 +45,13 @@ pub struct WindowOptions {
     /// the window buttons, leaving the first [`Frame::titlebar_height`]
     /// points free of widgets on the left. Elsewhere it has no effect.
     pub unified_titlebar: bool,
+    /// With the `persistence` feature: a name for this app's saved state
+    /// (e.g. "com.example.editor"). The UI state (window positions, panel
+    /// sizes, open sections, table columns), the native window's position
+    /// and size, and the values set with [`Frame::set_value`] are saved
+    /// when the app exits and restored when it starts, in the platform's
+    /// configuration folder. Main window only.
+    pub persistence_id: Option<String>,
 }
 
 impl Default for WindowOptions {
@@ -51,6 +60,7 @@ impl Default for WindowOptions {
             title: "rustroke app".to_owned(),
             inner_size: (800.0, 600.0),
             unified_titlebar: false,
+            persistence_id: None,
         }
     }
 }
@@ -89,6 +99,8 @@ pub struct Frame<'a> {
     close: bool,
     /// Height of the title bar drawn over the content, in points.
     titlebar_height: f32,
+    /// App values kept between runs (see [`Frame::set_value`]).
+    storage: &'a mut std::collections::BTreeMap<String, String>,
 }
 
 impl Frame<'_> {
@@ -119,6 +131,19 @@ impl Frame<'_> {
     /// dragging an empty part of it moves the window.
     pub fn titlebar_height(&self) -> f32 {
         self.titlebar_height
+    }
+
+    /// A value saved with [`Frame::set_value`] (in this run, or in an
+    /// earlier one with [`WindowOptions::persistence_id`]).
+    pub fn value(&self, key: &str) -> Option<&str> {
+        self.storage.get(key).map(String::as_str)
+    }
+
+    /// Keeps a string value under `key` (e.g. the app's settings, as JSON)
+    /// and, with [`WindowOptions::persistence_id`] and the `persistence`
+    /// feature, saves it for the next run.
+    pub fn set_value(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.storage.insert(key.into(), value.into());
     }
 
     /// Whether [`Frame::close`] was called this frame.
@@ -357,7 +382,12 @@ pub fn run(options: WindowOptions, app: impl App) -> Result<(), RunError> {
         extras: Vec::new(),
         requested: Vec::new(),
         error: None,
+        storage: std::collections::BTreeMap::new(),
+        restored_ui: None,
+        restored_position: None,
     };
+    #[cfg(feature = "persistence")]
+    persistence::restore(&mut runner);
     event_loop
         .run_app(&mut runner)
         .map_err(RunError::EventLoop)?;
@@ -377,6 +407,13 @@ struct Runner<A> {
     /// The windows the last main frame asked for.
     requested: Vec<(Id, WindowOptions)>,
     error: Option<RunError>,
+    /// App values (see [`Frame::set_value`]).
+    storage: std::collections::BTreeMap<String, String>,
+    /// Saved UI state to restore into the main window's context.
+    #[cfg_attr(not(feature = "persistence"), allow(dead_code))]
+    restored_ui: Option<String>,
+    /// Saved position of the main window, in logical pixels.
+    restored_position: Option<(f64, f64)>,
 }
 
 /// One native window with its own UI state and renderer.
@@ -471,13 +508,14 @@ impl WindowState {
     fn redraw(
         &mut self,
         fonts: &mut Fonts,
+        storage: &mut std::collections::BTreeMap<String, String>,
         start: Instant,
         window_id: Option<Id>,
         update: impl FnOnce(&mut Frame<'_>),
     ) -> (Vec<(Id, WindowOptions)>, bool, bool) {
         // Window scale factors are small values like 1.0, 1.5 or 2.0.
         #[allow(clippy::cast_possible_truncation)]
-        let pixels_per_point = self.window.scale_factor() as f32;
+        let pixels_per_point = self.window.scale_factor() as f32 * self.ctx.zoom_factor();
         let size = self.renderer.size();
         let screen_rect = Rect::from_min_max(
             point(0.0, 0.0),
@@ -512,8 +550,10 @@ impl WindowState {
             window_id,
             close: false,
             titlebar_height: self.titlebar_height,
+            storage,
         };
         update(&mut frame);
+        rustroke_widgets::show_inspector(&mut frame);
         let Frame {
             shapes,
             clear_color,
@@ -551,9 +591,11 @@ impl WindowState {
             self.window.set_ime_allowed(self.ime_allowed);
         }
         if let Some(r) = output.ime_cursor {
+            // winit's logical units don't include the zoom.
+            let z = self.ctx.zoom_factor();
             self.window.set_ime_cursor_area(
-                winit::dpi::LogicalPosition::new(r.min.x, r.min.y),
-                winit::dpi::LogicalSize::new(r.width().max(1.0), r.height()),
+                winit::dpi::LogicalPosition::new(r.min.x * z, r.min.y * z),
+                winit::dpi::LogicalSize::new(r.width().max(1.0) * z, r.height() * z),
             );
         }
         if output.cursor != self.cursor {
@@ -622,12 +664,16 @@ impl<A: App> Runner<A> {
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop, window: WindowId) {
         let Self {
-            app, fonts, start, ..
+            app,
+            fonts,
+            start,
+            storage,
+            ..
         } = self;
         let had_input;
         if let Some(main) = self.main.as_mut().filter(|m| m.window.id() == window) {
             let (requested, input, close) =
-                main.redraw(fonts, *start, None, |frame| app.update(frame));
+                main.redraw(fonts, storage, *start, None, |frame| app.update(frame));
             if close {
                 event_loop.exit();
                 return;
@@ -652,7 +698,7 @@ impl<A: App> Runner<A> {
         {
             let id = *id;
             let close;
-            (_, had_input, close) = state.redraw(fonts, *start, Some(id), |frame| {
+            (_, had_input, close) = state.redraw(fonts, storage, *start, Some(id), |frame| {
                 app.update_window(id, frame);
             });
             if close {
@@ -702,6 +748,11 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
         }
     }
 
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(feature = "persistence")]
+        persistence::save(self);
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let mut next: Option<Instant> = None;
@@ -730,7 +781,21 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
             return;
         }
         match WindowState::new(event_loop, &self.options, &self.fonts, &self.proxy) {
-            Ok(state) => self.main = Some(state),
+            #[cfg_attr(not(feature = "persistence"), allow(unused_mut))]
+            Ok(mut state) => {
+                if let Some((x, y)) = self.restored_position.take() {
+                    state
+                        .window
+                        .set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+                }
+                #[cfg(feature = "persistence")]
+                if let Some(ui) = self.restored_ui.take()
+                    && let Err(e) = state.ctx.load_state(&ui)
+                {
+                    log::warn!("could not restore the UI state: {e}");
+                }
+                self.main = Some(state);
+            }
             Err(e) => {
                 self.error = Some(e);
                 event_loop.exit();
@@ -780,14 +845,106 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
             // soon as it becomes visible.
             WindowEvent::Occluded(false) => state.window.request_redraw(),
             event => {
-                if state
-                    .input
-                    .on_window_event(&event, state.window.scale_factor())
-                    && needs_frame(&event, &state.ctx, &state.input)
+                if state.input.on_window_event(
+                    &event,
+                    state.window.scale_factor() * f64::from(state.ctx.zoom_factor()),
+                ) && needs_frame(&event, &state.ctx, &state.input)
                 {
                     state.window.request_redraw();
                 }
             }
+        }
+    }
+}
+
+/// Saving and restoring state between runs (feature `persistence`).
+#[cfg(feature = "persistence")]
+mod persistence {
+    use std::path::PathBuf;
+
+    use super::{App, Runner};
+
+    /// Where the state of app `id` is saved.
+    fn path(id: &str) -> Option<PathBuf> {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let base = if cfg!(target_os = "macos") {
+            home?.join("Library/Application Support")
+        } else if cfg!(target_os = "windows") {
+            PathBuf::from(std::env::var_os("APPDATA")?)
+        } else {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .or_else(|| home.map(|h| h.join(".config")))?
+        };
+        Some(base.join(id).join("rustroke-state.json"))
+    }
+
+    /// Reads the saved state, if any, into the runner before the window
+    /// is created.
+    pub(super) fn restore<A: App>(runner: &mut Runner<A>) {
+        let Some(file) = runner.options.persistence_id.as_deref().and_then(path) else {
+            return;
+        };
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            return;
+        };
+        let Ok(saved) = serde_json::from_str::<serde_json::Value>(&text) else {
+            log::warn!("ignoring unreadable state file {}", file.display());
+            return;
+        };
+        if let Some(ui) = saved.get("ui").and_then(|v| v.as_str()) {
+            runner.restored_ui = Some(ui.to_owned());
+        }
+        if let Some(app) = saved.get("app").and_then(|v| v.as_object()) {
+            for (k, v) in app {
+                if let Some(v) = v.as_str() {
+                    runner.storage.insert(k.clone(), v.to_owned());
+                }
+            }
+        }
+        if let Some([x, y, w, h]) = saved
+            .get("window")
+            .and_then(|v| serde_json::from_value::<[f64; 4]>(v.clone()).ok())
+            && w >= 100.0
+            && h >= 100.0
+        {
+            runner.options.inner_size = (w, h);
+            runner.restored_position = Some((x, y));
+        }
+    }
+
+    /// Writes the state of the main window and the app values.
+    pub(super) fn save<A: App>(runner: &Runner<A>) {
+        let (Some(file), Some(main)) = (
+            runner.options.persistence_id.as_deref().and_then(path),
+            runner.main.as_ref(),
+        ) else {
+            return;
+        };
+        let scale = main.window.scale_factor();
+        let size = main.window.inner_size().to_logical::<f64>(scale);
+        let window = main
+            .window
+            .outer_position()
+            .ok()
+            .map(|p| p.to_logical::<f64>(scale))
+            .map(|p| [p.x, p.y, size.width, size.height]);
+        let state = serde_json::json!({
+            "ui": main.ctx.save_state(),
+            "window": window,
+            "app": runner.storage,
+        });
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(
+                &file,
+                serde_json::to_string_pretty(&state).unwrap_or_default(),
+            )
+        };
+        if let Err(e) = write() {
+            log::warn!("could not save the state to {}: {e}", file.display());
         }
     }
 }

@@ -129,7 +129,7 @@ impl Panel {
         let default = self
             .default_size
             .unwrap_or(if vertical_side { 200.0 } else { 32.0 });
-        let size: f32 = ctx.data(self.id).unwrap_or(default);
+        let size: f32 = ctx.data_persisted(self.id).unwrap_or(default);
 
         let rect = match self.side {
             PanelSide::Top => Rect::from_min_size(available.min, vec2(available.width(), size)),
@@ -229,7 +229,7 @@ impl Panel {
         });
 
         if new_size != size {
-            ctx.insert_data(self.id, new_size);
+            ctx.insert_persisted(self.id, new_size);
             ctx.request_repaint();
         }
         ctx.set_available_rect(remaining);
@@ -358,10 +358,14 @@ impl<'open> Window<'open> {
         let title_height = style.spacing.interact_height + 4.0;
         let screen = ctx.input().screen_rect;
 
+        let saved_key = self.id.with("saved");
+        let saved: Option<(f32, f32, f32, Option<f32>)> = ctx.data_persisted(saved_key);
         let mut state: WindowState = ctx.data(self.id).unwrap_or(WindowState {
-            pos: self.default_pos.unwrap_or(point(60.0, 60.0)),
-            width: self.default_width,
-            height: self.default_height,
+            pos: saved.map_or(self.default_pos.unwrap_or(point(60.0, 60.0)), |s| {
+                point(s.0, s.1)
+            }),
+            width: saved.map_or(self.default_width, |s| s.2),
+            height: saved.map_or(self.default_height, |s| s.3),
             content_size: Vec2::ZERO,
         });
         // Keep the title bar reachable.
@@ -479,6 +483,15 @@ impl<'open> Window<'open> {
         if old != Some(new_state) {
             ctx.insert_data(self.id, new_state);
             ctx.request_repaint();
+            let place = (
+                new_state.pos.x,
+                new_state.pos.y,
+                new_state.width,
+                new_state.height,
+            );
+            if saved != Some(place) {
+                ctx.insert_persisted(saved_key, place);
+            }
         }
         if close && let Some(open) = self.open {
             *open = false;

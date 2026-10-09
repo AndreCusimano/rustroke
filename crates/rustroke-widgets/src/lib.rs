@@ -15,6 +15,7 @@
 //! tested by feeding [`rustroke_core::RawInput`] to a [`Context`].
 
 mod accessibility;
+mod automation;
 mod collapsing;
 mod combo_box;
 mod containers;
@@ -23,6 +24,7 @@ mod dock;
 mod drag_value;
 mod grid;
 mod id;
+mod inspector;
 mod layout;
 mod list;
 #[cfg(feature = "markdown")]
@@ -42,16 +44,18 @@ mod ui;
 pub mod widgets;
 
 pub use accessibility::{NumericInfo, WidgetDescription, WidgetInfo, WidgetRole};
+pub use automation::Automation;
 pub use collapsing::{CollapsingHeader, CollapsingResponse};
 pub use combo_box::ComboBox;
 pub use containers::{CentralPanel, Panel, PanelSide, ScrollArea, UiRoot, Window};
 pub use context::{
-    Context, CursorIcon, FrameOutput, LayerId, Order, RepaintHandle, Sense, TextureHandle,
+    Context, CursorIcon, FrameOutput, LayerId, Order, Persist, RepaintHandle, Sense, TextureHandle,
 };
 pub use dock::{DockArea, DockNode, DockState, DockViewer, SplitAxis};
 pub use drag_value::DragValue;
 pub use grid::Grid;
 pub use id::Id;
+pub use inspector::show_inspector;
 pub use layout::{Align, Direction, Layout};
 pub use list::{List, ListResponse};
 #[cfg(feature = "markdown")]

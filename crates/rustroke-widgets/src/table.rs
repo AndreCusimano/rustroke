@@ -103,6 +103,10 @@ pub struct TableResponse {
     pub visible_rows: Range<usize>,
 }
 
+/// What is saved of a table between runs: column widths and the sort
+/// order (column, ascending).
+type SavedTable = (Vec<f32>, Option<(usize, bool)>);
+
 /// Column widths, sort order and scroll position, kept between frames.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct TableState {
@@ -255,7 +259,21 @@ impl Table {
         let sticky = self.sticky_columns.min(ncols);
         let bar = style.spacing.scrollbar_width;
 
-        let mut state: TableState = ui.ctx().data(id).unwrap_or_default();
+        // Column widths and sort order survive restarts (with the
+        // `persistence` feature).
+        let saved_key = id.with("saved");
+        let mut state: TableState = match ui.ctx().data(id) {
+            Some(state) => state,
+            None => {
+                let saved: Option<SavedTable> = ui.ctx().data_persisted(saved_key);
+                let (widths, sort) = saved.unwrap_or_default();
+                TableState {
+                    widths,
+                    sort: sort.map(|(column, ascending)| SortOrder { column, ascending }),
+                    ..TableState::default()
+                }
+            }
+        };
         if state.widths.len() != ncols {
             state.widths = columns.iter().map(|c| c.width).collect();
         }
@@ -672,6 +690,11 @@ impl Table {
         }
 
         if state != old_state {
+            if state.widths != old_state.widths || state.sort != old_state.sort {
+                let sort = state.sort.map(|s| (s.column, s.ascending));
+                ui.ctx()
+                    .insert_persisted(saved_key, (state.widths.clone(), sort));
+            }
             ui.ctx().insert_data(id, state.clone());
             ui.ctx().request_repaint();
         }

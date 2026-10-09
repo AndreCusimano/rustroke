@@ -81,6 +81,8 @@ pub struct Integration {
     /// Texture changes not yet uploaded (frames may run without paint).
     textures: TexturesDelta,
     pixels_per_point: f32,
+    /// App values (see [`Frame::set_value`]).
+    storage: std::collections::BTreeMap<String, String>,
     title: Option<String>,
     /// Window changes from the last frame, applied by `run`.
     pending_cursor: Option<CursorIcon>,
@@ -122,6 +124,7 @@ impl Integration {
             meshes: Vec::new(),
             textures: TexturesDelta::default(),
             pixels_per_point: 1.0,
+            storage: std::collections::BTreeMap::new(),
             title: None,
             pending_cursor: None,
             pending_ime: None,
@@ -147,7 +150,10 @@ impl Integration {
 
     /// Feeds a window event to the UI.
     pub fn on_window_event(&mut self, window: &Window, event: &WindowEvent) -> EventResponse {
-        self.on_window_event_scaled(event, window.scale_factor())
+        self.on_window_event_scaled(
+            event,
+            window.scale_factor() * f64::from(self.ctx.zoom_factor()),
+        )
     }
 
     /// [`Integration::on_window_event`] with the window's scale factor.
@@ -225,8 +231,10 @@ impl Integration {
             window_id: None,
             close: false,
             titlebar_height: 0.0,
+            storage: &mut self.storage,
         };
         add(&mut frame);
+        rustroke_widgets::show_inspector(&mut frame);
         let Frame {
             mut shapes,
             request_repaint,
@@ -266,7 +274,7 @@ impl Integration {
         let size = window.inner_size();
         // Window scale factors are small values like 1.0, 1.5 or 2.0.
         #[allow(clippy::cast_possible_truncation)]
-        let ppp = window.scale_factor() as f32;
+        let ppp = window.scale_factor() as f32 * self.ctx.zoom_factor();
         let out = self.run_frame(PhysicalSize::new(size.width, size.height), ppp, add);
         if let Some(cursor) = self.pending_cursor.take()
             && cursor != self.cursor
@@ -280,9 +288,10 @@ impl Integration {
             window.set_ime_allowed(self.ime_allowed);
         }
         if let Some(r) = ime {
+            let z = self.ctx.zoom_factor();
             window.set_ime_cursor_area(
-                winit::dpi::LogicalPosition::new(r.min.x, r.min.y),
-                winit::dpi::LogicalSize::new(r.width().max(1.0), r.height()),
+                winit::dpi::LogicalPosition::new(r.min.x * z, r.min.y * z),
+                winit::dpi::LogicalSize::new(r.width().max(1.0) * z, r.height() * z),
             );
         }
         if let Some(title) = self.title.take() {

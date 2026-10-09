@@ -146,7 +146,16 @@
 //!   them in [`App::update_window`].
 //! - **Testing**: [`testing::Harness`] runs your app without a window;
 //!   click widgets by label, type text, press keys, inspect
-//!   [`Context::widgets`] and render the frame to an image.
+//!   [`Context::widgets`] and the accessibility tree, and render the
+//!   frame to an image. [`Context::automation`] drives a running app from
+//!   another thread the same way.
+//! - **Saving state** (feature `persistence`): with
+//!   [`WindowOptions::persistence_id`] window positions, panel sizes,
+//!   open sections, table columns and your own values
+//!   ([`Frame::set_value`]) are restored at the next start.
+//! - **Debugging**: Cmd/Ctrl+Alt+I opens the inspector (what is under the
+//!   pointer, focus, frame time, live style editing); Cmd/Ctrl + = / - / 0
+//!   zoom the UI.
 //!
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
@@ -174,21 +183,22 @@ pub use rustroke_text::{
 };
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
-    Align, AnimatedImage, AnimatedTexture, Button, CentralPanel, Checkbox, CollapsingHeader,
-    CollapsingResponse, Column, ComboBox, Context, CursorIcon, Direction, DockArea, DockNode,
-    DockState, DockViewer, DragValue, FocusLost, FrameOutput, Grid, Hyperlink, Icon, IconToggle,
-    Id, InnerResponse, Label, LayerId, Layout, List, ListResponse, Modal, ModalResponse, Numeric,
-    Order, Panel, PanelSide, ProgressBar, PropertyGrid, PropertyGridUi, RadioButton,
-    ReferenceField, RepaintHandle, Response, ScrollArea, SearchField, SelectableLabel, Sense,
-    Separator, Slider, SortOrder, Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel,
-    Table, TableResponse, TextEdit, TextureHandle, ToolButton, ToolButtonResponse, Tree,
+    Align, AnimatedImage, AnimatedTexture, Automation, Button, CentralPanel, Checkbox,
+    CollapsingHeader, CollapsingResponse, Column, ComboBox, Context, CursorIcon, Direction,
+    DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost, FrameOutput, Grid, Hyperlink,
+    Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout, List, ListResponse, Modal,
+    ModalResponse, Numeric, Order, Panel, PanelSide, ProgressBar, PropertyGrid, PropertyGridUi,
+    RadioButton, ReferenceField, RepaintHandle, Response, ScrollArea, SearchField, SelectableLabel,
+    Sense, Separator, Slider, SortOrder, Spinner, SplitAxis, Style, TabBar, TabBarResponse,
+    TabLabel, Table, TableResponse, TextEdit, TextureHandle, ToolButton, ToolButtonResponse, Tree,
     TreeResponse, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
+    show_inspector,
 };
 #[cfg(feature = "markdown")]
 pub use rustroke_widgets::{ImageLoader, Markdown};
 pub use rustroke_winit::{
     App, CallbackFn, CallbackInfo, EventResponse, Frame, Integration, RunError, RunOutput,
-    WindowOptions, run, testing, wgpu, winit,
+    WindowOptions, accesskit, run, testing, wgpu, winit,
 };
 
 /// Decodes a PNG or JPEG file (already read into memory) into an image

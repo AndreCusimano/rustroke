@@ -11,6 +11,20 @@ use rustroke_text::Fonts;
 use crate::accessibility::{self, PendingAction, WidgetDescription, WidgetInfo};
 use crate::{Id, Response, Style, Ui};
 
+/// State that [`Context::insert_persisted`] can store: with the
+/// `persistence` feature it must also be serializable with serde.
+#[cfg(feature = "persistence")]
+pub trait Persist: serde::Serialize + serde::de::DeserializeOwned + Send + Sync + 'static {}
+#[cfg(feature = "persistence")]
+impl<T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync + 'static> Persist for T {}
+
+/// State that [`Context::insert_persisted`] can store: with the
+/// `persistence` feature it must also be serializable with serde.
+#[cfg(not(feature = "persistence"))]
+pub trait Persist: Send + Sync + 'static {}
+#[cfg(not(feature = "persistence"))]
+impl<T: Send + Sync + 'static> Persist for T {}
+
 /// What a widget reacts to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sense {
@@ -385,6 +399,18 @@ pub struct Context {
     open_popup: Option<Id>,
     /// Submenus open inside that popup, outermost first.
     open_submenus: Vec<Id>,
+    /// Global UI zoom (Cmd/Ctrl + = / - / 0), multiplying the platform's
+    /// pixels per point.
+    zoom: f32,
+    /// The zoom keyboard shortcuts are handled.
+    zoom_shortcuts: bool,
+    /// The debugging inspector is shown.
+    inspector_open: bool,
+    /// Shared with [`crate::Automation`] handles, once one was created.
+    automation: Option<Arc<crate::automation::AutomationShared>>,
+    /// State saved by [`Context::save_state`]: JSON by id.
+    #[cfg(feature = "persistence")]
+    persisted: HashMap<u64, String>,
     /// A rectangle (window points) that scroll areas should bring into
     /// view, how to align it, and whether it was set in an earlier frame.
     scroll_target: Option<(Rect, Option<crate::Align>, bool)>,
@@ -421,6 +447,12 @@ impl Default for Context {
             window_order: Vec::new(),
             open_popup: None,
             open_submenus: Vec::new(),
+            zoom: 1.0,
+            zoom_shortcuts: true,
+            inspector_open: false,
+            automation: None,
+            #[cfg(feature = "persistence")]
+            persisted: HashMap::new(),
             scroll_target: None,
             hover_start: None,
             textures: TextureManager::default(),
@@ -545,6 +577,59 @@ impl Context {
     /// Stores state for `id` (e.g. a widget's scroll offset) until replaced.
     pub fn insert_data<T: Send + Sync + 'static>(&mut self, id: Id, value: T) {
         self.data.0.insert(id, Box::new(value));
+    }
+
+    /// Stores state for `id` like [`Context::insert_data`] and, with the
+    /// `persistence` feature, also in what [`Context::save_state`] saves
+    /// (window positions, panel sizes, open sections...).
+    pub fn insert_persisted<T: Persist + Clone>(&mut self, id: Id, value: T) {
+        #[cfg(feature = "persistence")]
+        if let Ok(json) = serde_json::to_string(&value) {
+            self.persisted.insert(id.value(), json);
+        }
+        self.insert_data(id, value);
+    }
+
+    /// State stored with [`Context::insert_persisted`] in this run, or
+    /// restored by [`Context::load_state`].
+    pub fn data_persisted<T: Persist + Clone>(&mut self, id: Id) -> Option<T> {
+        if let Some(value) = self.data::<T>(id) {
+            return Some(value);
+        }
+        #[cfg(feature = "persistence")]
+        {
+            let value: T = serde_json::from_str(self.persisted.get(&id.value())?).ok()?;
+            self.insert_data(id, value.clone());
+            Some(value)
+        }
+        #[cfg(not(feature = "persistence"))]
+        None
+    }
+
+    /// The persisted UI state (see [`Context::insert_persisted`]) as JSON,
+    /// to write to a file when the app exits.
+    #[cfg(feature = "persistence")]
+    pub fn save_state(&self) -> String {
+        let map: std::collections::BTreeMap<String, &str> = self
+            .persisted
+            .iter()
+            .map(|(id, json)| (id.to_string(), json.as_str()))
+            .collect();
+        serde_json::to_string(&map).unwrap_or_default()
+    }
+
+    /// Restores UI state saved with [`Context::save_state`] (call it before
+    /// the first frame). Unknown or malformed entries are ignored.
+    #[cfg(feature = "persistence")]
+    pub fn load_state(&mut self, json: &str) -> Result<(), String> {
+        let map: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(json).map_err(|e| e.to_string())?;
+        for (id, value) in map {
+            if let Ok(id) = id.parse::<u64>() {
+                self.persisted.insert(id, value);
+            }
+        }
+        Ok(())
     }
 
     /// Forgets the state stored for `id`.
@@ -693,8 +778,11 @@ impl Context {
     /// Starts a frame: applies input, brings a clicked window to the front,
     /// closes popups clicked outside of, and handles keyboard focus
     /// navigation (Tab / Shift+Tab / Escape) using the previous frame.
-    pub fn begin_frame(&mut self, raw: RawInput) {
+    pub fn begin_frame(&mut self, mut raw: RawInput) {
         self.in_frame = true;
+        if let Some(automation) = &self.automation {
+            raw.events.extend(automation.take_events());
+        }
         self.input.begin_frame(raw);
         self.prev_frame = std::mem::take(&mut self.this_frame);
         self.this_frame.available_rect = self.input.screen_rect;
@@ -746,6 +834,37 @@ impl Context {
             && !self.reachable_focusables().contains(&id)
         {
             self.focused = None;
+        }
+
+        if self.zoom_shortcuts {
+            let command = Modifiers::COMMAND;
+            let command_shift = Modifiers {
+                shift: true,
+                ..command
+            };
+            let input = &mut self.input;
+            let zoom = if input.consume_key(Key::Equals, command)
+                || input.consume_key(Key::Equals, command_shift)
+            {
+                Some(self.zoom * 1.1)
+            } else if input.consume_key(Key::Minus, command) {
+                Some(self.zoom / 1.1)
+            } else if input.consume_key(Key::Num0, command) {
+                Some(1.0)
+            } else {
+                None
+            };
+            if let Some(zoom) = zoom {
+                self.set_zoom_factor(zoom);
+            }
+        }
+
+        let inspector_keys = Modifiers {
+            alt: true,
+            ..Modifiers::COMMAND
+        };
+        if self.input.consume_key(Key::I, inspector_keys) {
+            self.inspector_open = !self.inspector_open;
         }
 
         if self.input.consume_key(Key::Tab, Modifiers::NONE) {
@@ -835,6 +954,9 @@ impl Context {
         }
         self.pending_clicks.clear();
         self.last_widgets = std::mem::take(&mut self.this_frame.described);
+        if let Some(automation) = &self.automation {
+            automation.end_frame(&self.last_widgets, self.repaint_callback.0.clone());
+        }
         let mut output = std::mem::take(&mut self.this_frame.output);
         output.textures = TexturesDelta {
             set: std::mem::take(&mut *lock(&self.textures.pending)),
@@ -1062,6 +1184,52 @@ impl Context {
             self.request_repaint();
         }
         current
+    }
+
+    // ---- Automation ----
+
+    /// A handle to drive this UI from another thread: read its widgets,
+    /// click them, type and press keys (see [`crate::Automation`]).
+    pub fn automation(&mut self) -> crate::Automation {
+        let shared = self.automation.get_or_insert_with(Default::default).clone();
+        crate::Automation { shared }
+    }
+
+    // ---- Inspector ----
+
+    /// Whether the debugging inspector is shown (see
+    /// [`crate::show_inspector`]); Cmd/Ctrl+Alt+I toggles it.
+    pub fn is_inspector_open(&self) -> bool {
+        self.inspector_open
+    }
+
+    /// Shows or hides the debugging inspector.
+    pub fn set_inspector_open(&mut self, open: bool) {
+        self.inspector_open = open;
+    }
+
+    // ---- Zoom ----
+
+    /// The global zoom: 1 is the platform's size, 2 makes everything
+    /// twice as big. The platform layer multiplies its pixels per point by
+    /// it (from the next frame).
+    pub fn zoom_factor(&self) -> f32 {
+        self.zoom
+    }
+
+    /// Changes the global zoom (clamped to 0.5–3).
+    pub fn set_zoom_factor(&mut self, zoom: f32) {
+        let zoom = zoom.clamp(0.5, 3.0);
+        if zoom != self.zoom {
+            self.zoom = zoom;
+            self.this_frame.output.repaint = true;
+        }
+    }
+
+    /// Whether Cmd/Ctrl + = / - / 0 zoom in, out and back (default
+    /// `true`).
+    pub fn set_zoom_shortcuts(&mut self, enabled: bool) {
+        self.zoom_shortcuts = enabled;
     }
 
     // ---- Scrolling ----

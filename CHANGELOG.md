@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-09
+
+### Added
+
+- **Persistence** (feature `persistence`): `WindowOptions::persistence_id`
+  saves the UI state (window positions and sizes, panel sizes, open
+  sections, table column widths and sort, open tree nodes), the native
+  window's position and size, and app values (`Frame::set_value` /
+  `Frame::value`) when the app exits, and restores them at start, in the
+  platform's configuration folder. `Context::insert_persisted` /
+  `data_persisted` for custom widgets, `Context::save_state` /
+  `load_state` for apps driving a `Context` directly; `DockState` can be
+  serialized with serde.
+- **Global zoom**: Cmd/Ctrl + = / - / 0 zoom the whole UI
+  (`Context::zoom_factor`, `set_zoom_factor`, `set_zoom_shortcuts`).
+- **Inspector**: Cmd/Ctrl+Alt+I opens a debugging window (frame time,
+  zoom, focus, the widgets under the pointer, outlined on screen, and the
+  style edited live); `show_inspector` for apps driving a `Context`.
+- **Automation**: `Context::automation()` gives a `Send` handle to drive
+  the app from another thread (read the widgets, click by label, type,
+  press keys, wait for frames), e.g. for end-to-end tests or an agent.
+- **Accessibility in tests**: `Harness::enable_accessibility`,
+  `accesskit_tree` and `find_by_role`; `accesskit` is re-exported.
+
+### Changed
+
+- `WindowOptions` has a new field, `persistence_id`.
+
 ## [0.12.0] — 2026-10-09
 
 ### Added
@@ -454,7 +482,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/AndreCusimano/rustroke/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/AndreCusimano/rustroke/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/AndreCusimano/rustroke/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/AndreCusimano/rustroke/compare/v0.9.0...v0.10.0

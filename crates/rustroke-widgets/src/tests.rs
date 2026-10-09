@@ -3547,3 +3547,105 @@ fn markdown_renders_blocks_inline_formats_and_links() {
     let out = h.frame(click_events(at), show);
     assert_eq!(out.open_url.as_deref(), Some("https://example.com"));
 }
+
+#[test]
+fn zoom_shortcuts_change_the_zoom_factor() {
+    let mut h = Harness::new();
+    h.frame(vec![key(Key::Equals, Modifiers::COMMAND)], |_| {});
+    assert!((h.ctx.zoom_factor() - 1.1).abs() < 1e-5);
+    h.frame(vec![key(Key::Minus, Modifiers::COMMAND)], |_| {});
+    h.frame(vec![key(Key::Minus, Modifiers::COMMAND)], |_| {});
+    assert!(h.ctx.zoom_factor() < 1.0);
+    h.frame(vec![key(Key::Num0, Modifiers::COMMAND)], |_| {});
+    assert_eq!(h.ctx.zoom_factor(), 1.0);
+    h.ctx.set_zoom_factor(10.0);
+    assert_eq!(h.ctx.zoom_factor(), 3.0, "clamped");
+}
+
+#[test]
+fn inspector_toggles_and_lists_widgets_under_the_pointer() {
+    let mut h = Harness::new();
+    let keys = Modifiers {
+        alt: true,
+        ..Modifiers::COMMAND
+    };
+    let run = |h: &mut Harness, events| {
+        h.frame_with(events, |h| {
+            h.ctx.ui(SCREEN, &mut h.fonts, |ui| {
+                ui.button("Target");
+            });
+            crate::show_inspector(h);
+        })
+    };
+    run(&mut h, vec![]);
+    assert!(h.ctx.find_widget("Under the pointer").is_none());
+    let target = h.ctx.find_widget("Target").unwrap().rect.center();
+    run(&mut h, vec![key(Key::I, keys), move_to(target)]);
+    assert!(h.ctx.is_inspector_open());
+    run(&mut h, vec![]);
+    run(&mut h, vec![]);
+    assert!(h.ctx.find_widget("Under the pointer").is_some());
+    assert!(
+        h.ctx
+            .widgets()
+            .iter()
+            .any(|w| w.info.label.starts_with("Button \"Target\"")),
+        "lists the button"
+    );
+    run(&mut h, vec![key(Key::I, keys)]);
+    run(&mut h, vec![]);
+    assert!(h.ctx.find_widget("Under the pointer").is_none());
+}
+
+#[cfg(feature = "persistence")]
+#[test]
+fn ui_state_survives_save_and_load() {
+    use crate::{CollapsingHeader, Panel};
+    let build = |h: &mut Harness, events| {
+        let mut out = (Rect::NOTHING, Rect::NOTHING, false);
+        h.frame_with(events, |h| {
+            out.0 = Panel::left("side")
+                .show(h, |ui| ui.label("Side"))
+                .response
+                .rect;
+            CentralPanel.show(h, |ui| {
+                out.2 = CollapsingHeader::new("Details")
+                    .show(ui, |ui| ui.label("Inside"))
+                    .open;
+            });
+            out.1 = Window::new("Tools")
+                .default_pos(point(200.0, 100.0))
+                .show(h, |ui| ui.label("Tool"))
+                .unwrap()
+                .response
+                .rect;
+        });
+        out
+    };
+    let mut h = Harness::new();
+    build(&mut h, vec![]);
+    let (panel, window, open) = build(&mut h, vec![]);
+    assert!(!open);
+    // Widen the panel, move the window, open the section.
+    let edge = point(panel.max.x, 150.0);
+    build(&mut h, vec![button(edge, true)]);
+    build(&mut h, vec![move_to(edge + vec2(40.0, 0.0))]);
+    build(&mut h, vec![button(edge + vec2(40.0, 0.0), false)]);
+    let title = window.min + vec2(20.0, 10.0);
+    build(&mut h, vec![button(title, true)]);
+    build(&mut h, vec![move_to(title + vec2(30.0, 50.0))]);
+    build(&mut h, vec![button(title + vec2(30.0, 50.0), false)]);
+    let header = h.ctx.find_widget("Details").unwrap().rect.center();
+    build(&mut h, click_events(header));
+    let before = build(&mut h, vec![]);
+    assert!(before.2, "opened");
+    let saved = h.ctx.save_state();
+
+    let mut fresh = Harness::new();
+    fresh.ctx.load_state(&saved).unwrap();
+    build(&mut fresh, vec![]);
+    let after = build(&mut fresh, vec![]);
+    assert_eq!(after.0.width(), before.0.width(), "panel width");
+    assert_eq!(after.1.min, before.1.min, "window position");
+    assert!(after.2, "section still open");
+}

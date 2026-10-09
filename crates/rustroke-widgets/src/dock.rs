@@ -10,6 +10,7 @@ use crate::{Align, CursorIcon, Id, Layout, Sense, Ui};
 
 /// Direction of a split.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "persistence", derive(serde::Serialize, serde::Deserialize))]
 pub enum SplitAxis {
     /// Side by side: first on the left.
     Horizontal,
@@ -19,6 +20,7 @@ pub enum SplitAxis {
 
 /// A node of the dock layout: a group of tabs, or a split in two.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "persistence", derive(serde::Serialize, serde::Deserialize))]
 pub enum DockNode<T> {
     /// Tabs shown one at a time.
     Tabs {
@@ -45,7 +47,10 @@ pub enum DockNode<T> {
 /// The layout of a [`DockArea`]: owned by the app, so it can be saved and
 /// changed in code. Build it with [`DockState::new`] and the split
 /// methods, or from [`DockNode`]s.
+/// With the `persistence` feature it can be saved with serde (when the
+/// tab type can), e.g. next to the app's settings.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "persistence", derive(serde::Serialize, serde::Deserialize))]
 pub struct DockState<T> {
     root: DockNode<T>,
     next_id: u64,
