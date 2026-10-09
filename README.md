@@ -94,7 +94,8 @@ fn main() -> Result<(), rustroke::RunError> {
   grids, separators. Any widget can be disabled, and buttons and fields
   can have their own colors, borders, radius and size.
 - **Layout**: rows, columns, alignment, wrapping, fixed-size widgets, grids
-  with aligned columns.
+  with aligned columns, flexbox (grow, wrap, justify) and CSS-style grids
+  (fractional columns, spans) computed with taffy.
 - **Containers**: top/bottom/side panels (resizable or as wide as their
   content), movable and resizable windows, modal dialogs, scroll areas
   (vertical, horizontal, both), popup and context menus with submenus,
@@ -173,6 +174,7 @@ cargo run -p rustroke --example rich_text --features markdown   # rich text, Mar
 cargo run -p rustroke --example graphics    # gradients, shadows, curves, transforms, animation
 cargo run -p rustroke --example platform --features native-menu,tray   # drag and drop, files, menu bar, tray
 cargo run -p rustroke --example pickers     # color, date and time pickers, toasts
+cargo run -p rustroke --example flex        # flexbox and grid layouts
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
 cargo run -p rustroke --example themes      # live theme editor
 cargo run -p rustroke --example extras      # images, disabled widgets, accessibility

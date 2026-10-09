@@ -17,6 +17,7 @@ workspace = true
 rustroke-core.workspace = true
 rustroke-text.workspace = true
 accesskit.workspace = true
+taffy.workspace = true
 pulldown-cmark = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

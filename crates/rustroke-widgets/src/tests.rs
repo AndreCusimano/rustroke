@@ -3791,3 +3791,109 @@ fn toasts_appear_expire_and_can_be_dismissed() {
     run(&mut h, vec![]);
     assert!(h.ctx.find_widget("Dismiss").is_none());
 }
+
+#[test]
+fn flex_rows_grow_justify_and_wrap() {
+    use crate::{Flex, FlexItem, FlexJustify};
+    let mut h = Harness::new();
+    let mut rects = Vec::new();
+    let run = |h: &mut Harness, justify: FlexJustify, grow: bool, wrap: bool| {
+        let mut out = Vec::new();
+        h.frame(vec![], |ui| {
+            Flex::row("bar")
+                .gap(10.0)
+                .justify(justify)
+                .wrap(wrap)
+                .show(ui, |flex| {
+                    let last = if wrap { 300.0 } else { 200.0 };
+                    for (i, w) in [60.0, 80.0, last].into_iter().enumerate() {
+                        let item = if grow && i == 1 {
+                            FlexItem::new().grow(1.0)
+                        } else {
+                            FlexItem::new()
+                        };
+                        let r = flex.add(item, |ui| {
+                            ui.add_sized(vec2(w, 20.0), crate::Label::new(format!("item {i}")));
+                        });
+                        out.push(r.response.rect);
+                    }
+                });
+        });
+        out
+    };
+    // Settles in two frames.
+    for _ in 0..3 {
+        rects = run(&mut h, FlexJustify::Start, true, false);
+    }
+    let avail = SCREEN.width();
+    assert!((rects[0].width() - 60.0).abs() < 0.5, "{rects:?}");
+    assert!(
+        (rects[2].max.x - avail).abs() < 0.5,
+        "the row fills the width: {rects:?}"
+    );
+    assert!(
+        (rects[1].width() - (avail - 60.0 - 200.0 - 20.0)).abs() < 0.5,
+        "item 1 grows"
+    );
+
+    for _ in 0..3 {
+        rects = run(&mut h, FlexJustify::SpaceBetween, false, true);
+    }
+    // 60 + 80 + 300 + gaps don't fit in 400: the last item wraps.
+    assert!(rects[2].min.y > rects[0].max.y, "{rects:?}");
+    assert!(
+        (rects[1].max.x - avail).abs() < 0.5,
+        "space between pushes item 1 right"
+    );
+}
+
+#[test]
+fn flex_grid_places_cells_in_fraction_columns() {
+    use crate::{FlexGrid, GridCell, Track};
+    let mut h = Harness::new();
+    let mut rects = Vec::new();
+    for _ in 0..3 {
+        rects.clear();
+        h.frame(vec![], |ui| {
+            FlexGrid::new(
+                "g",
+                vec![
+                    Track::Points(100.0),
+                    Track::Fraction(1.0),
+                    Track::Fraction(1.0),
+                ],
+            )
+            .gap(0.0)
+            .show(ui, |grid| {
+                rects.push(
+                    grid.add(GridCell::at(0, 0), |ui| ui.label("a"))
+                        .response
+                        .rect,
+                );
+                rects.push(
+                    grid.add(GridCell::at(1, 0), |ui| ui.label("b"))
+                        .response
+                        .rect,
+                );
+                rects.push(
+                    grid.add(GridCell::at(2, 0), |ui| ui.label("c"))
+                        .response
+                        .rect,
+                );
+                rects.push(
+                    grid.add(GridCell::at(0, 1).span(3, 1), |ui| ui.label("wide"))
+                        .response
+                        .rect,
+                );
+            });
+        });
+    }
+    assert!((rects[0].width() - 100.0).abs() < 0.5);
+    assert!(
+        (rects[1].width() - rects[2].width()).abs() < 0.5,
+        "equal fractions"
+    );
+    assert!((rects[1].width() - 150.0).abs() < 0.5, "{rects:?}");
+    assert!((rects[3].width() - 400.0).abs() < 0.5, "spans all columns");
+    assert!(rects[3].min.y >= rects[0].max.y);
+}

@@ -76,7 +76,9 @@
 //!   your own.
 //! - **Layout**: a [`Ui`] stacks widgets top to bottom. Use
 //!   [`Ui::horizontal`], [`Ui::vertical_centered`], [`Ui::with_layout`]
-//!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables.
+//!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables; [`Flex`]
+//!   (flexbox: wrapping, growing, justified items) and [`FlexGrid`]
+//!   (CSS-style grid with fractional columns and spans).
 //! - **Containers**: [`Panel`] (top/bottom/left/right bars), the central
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
 //!   modal dialogs ([`Modal`]), [`ScrollArea`] (vertical, horizontal or
@@ -169,7 +171,7 @@
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
 //! `table`, `rich_text` with `--features markdown`, `graphics`,
-//! `platform` with `--features native-menu,tray`, `pickers`,
+//! `platform` with `--features native-menu,tray`, `pickers`, `flex`,
 //! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
@@ -203,6 +205,10 @@ pub use rustroke_widgets::{
     TabBar, TabBarResponse, TabLabel, Table, TableResponse, TextEdit, TextureHandle, TimePicker,
     Toast, ToastLevel, ToolButton, ToolButtonResponse, Tree, TreeResponse, Ui, UiRoot, Visuals,
     Widget, WidgetDescription, WidgetInfo, WidgetRole, Window, show_inspector, show_toasts,
+};
+pub use rustroke_widgets::{
+    Flex, FlexAlign, FlexDirection, FlexGrid, FlexItem, FlexJustify, FlexUi, GridCell, GridUi,
+    Track,
 };
 #[cfg(feature = "markdown")]
 pub use rustroke_widgets::{ImageLoader, Markdown};

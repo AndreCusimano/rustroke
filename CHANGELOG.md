@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-09
+
+### Added
+
+- **Flexbox layout** (computed with taffy): `Flex::row(id)` /
+  `Flex::column(id)` with `wrap`, `gap`, `justify` (start, end, center,
+  space between / around / evenly) and `align` (start, end, center,
+  stretch); items added with `flex.add(FlexItem::new().grow(1.0)
+  .basis(..).shrink(..).align(..), |ui| ..)`.
+- **CSS-style grid**: `FlexGrid::new(id, vec![Track::Points(100.0),
+  Track::Fraction(1.0), Track::Auto])` with cells placed by
+  `GridCell::at(column, row).span(columns, rows)`.
+- Both settle in two frames, using the sizes their items had in the
+  previous frame (like `Grid`). New `flex` example.
+
 ## [0.15.0] — 2026-10-09
 
 ### Added
@@ -527,7 +542,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/AndreCusimano/rustroke/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/AndreCusimano/rustroke/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/AndreCusimano/rustroke/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/AndreCusimano/rustroke/compare/v0.12.0...v0.13.0

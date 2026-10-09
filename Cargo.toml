@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.15.0"
+version = "0.16.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -13,11 +13,11 @@ categories = ["gui", "graphics", "rendering"]
 repository = "https://github.com/AndreCusimano/rustroke"
 
 [workspace.dependencies]
-rustroke-core = { path = "crates/rustroke-core", version = "0.15.0" }
-rustroke-render = { path = "crates/rustroke-render", version = "0.15.0" }
-rustroke-text = { path = "crates/rustroke-text", version = "0.15.0" }
-rustroke-widgets = { path = "crates/rustroke-widgets", version = "0.15.0" }
-rustroke-winit = { path = "crates/rustroke-winit", version = "0.15.0" }
+rustroke-core = { path = "crates/rustroke-core", version = "0.16.0" }
+rustroke-render = { path = "crates/rustroke-render", version = "0.16.0" }
+rustroke-text = { path = "crates/rustroke-text", version = "0.16.0" }
+rustroke-widgets = { path = "crates/rustroke-widgets", version = "0.16.0" }
+rustroke-winit = { path = "crates/rustroke-winit", version = "0.16.0" }
 
 wgpu = "30"
 winit = "0.30.13"
@@ -32,6 +32,8 @@ accesskit = "0.25"
 accesskit_winit = "0.34"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 log = "0.4"
+# Flexbox and grid layout (`Flex`, `FlexGrid`).
+taffy = { version = "0.14", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "content_size"] }
 # Saving UI state (feature "persistence").
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

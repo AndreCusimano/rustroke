@@ -23,6 +23,7 @@ mod context;
 mod dnd;
 mod dock;
 mod drag_value;
+mod flex;
 mod grid;
 mod id;
 mod inspector;
@@ -56,6 +57,10 @@ pub use context::{
 };
 pub use dock::{DockArea, DockNode, DockState, DockViewer, SplitAxis};
 pub use drag_value::DragValue;
+pub use flex::{
+    Flex, FlexAlign, FlexDirection, FlexGrid, FlexItem, FlexJustify, FlexUi, GridCell, GridUi,
+    Track,
+};
 pub use grid::Grid;
 pub use id::Id;
 pub use inspector::show_inspector;
