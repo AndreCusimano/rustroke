@@ -76,7 +76,7 @@ pub use search_field::SearchField;
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
 pub use table::{Column, SortOrder, Table, TableResponse};
 pub use tabs::{TabBar, TabBarResponse, TabLabel};
-pub use text_edit::TextEdit;
+pub use text_edit::{LineHighlight, TextEdit};
 pub use toast::{Toast, ToastLevel, show_toasts};
 pub use tool_button::{IconToggle, ToolButton, ToolButtonResponse};
 pub use tree::{Tree, TreeResponse};

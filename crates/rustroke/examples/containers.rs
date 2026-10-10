@@ -86,7 +86,7 @@ impl App for Demo {
             });
         });
 
-        CentralPanel.show(frame, |ui| {
+        CentralPanel::default().show(frame, |ui| {
             ui.heading(format!("Screen {}", self.selected + 1));
             ui.label("Drag the edge of the left panel to resize it. Use the wheel or the bar to scroll the list.");
             ui.horizontal(|ui| {
@@ -151,6 +151,8 @@ fn main() -> Result<(), rustroke::RunError> {
             // With `--features persistence` window positions, the panel
             // width and the window size are restored on the next run.
             persistence_id: Some("rustroke.containers-example".into()),
+            min_inner_size: Some((640.0, 420.0)),
+            ..Default::default()
         },
         Demo {
             selected: 0,

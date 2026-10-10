@@ -61,6 +61,7 @@ pub struct Panel {
     default_size: Option<f32>,
     resizable: bool,
     auto_width: bool,
+    margin: Option<f32>,
 }
 
 impl Panel {
@@ -71,7 +72,15 @@ impl Panel {
             default_size: None,
             resizable: matches!(side, PanelSide::Left | PanelSide::Right),
             auto_width: false,
+            margin: None,
         }
+    }
+
+    /// Space between the panel's edges and its content, instead of the
+    /// style's `window_padding` (e.g. 0 for content that fills the panel).
+    pub fn margin(mut self, margin: f32) -> Self {
+        self.margin = Some(margin);
+        self
     }
 
     /// A panel along the top edge (toolbar, menu bar).
@@ -123,7 +132,7 @@ impl Panel {
     ) -> InnerResponse<R> {
         let (ctx, fonts) = root.parts();
         let style = std::sync::Arc::clone(ctx.style());
-        let pad = style.spacing.window_padding;
+        let pad = self.margin.unwrap_or(style.spacing.window_padding);
         let available = ctx.available_rect();
         let vertical_side = matches!(self.side, PanelSide::Left | PanelSide::Right);
         let default = self
@@ -240,15 +249,29 @@ impl Panel {
 }
 
 /// The area left after all [`Panel`]s, with the style's window margin.
+///
+/// ```ignore
+/// CentralPanel::default().show(frame, |ui| { /* ... */ });
+/// ```
 #[derive(Clone, Copy, Debug, Default)]
-pub struct CentralPanel;
+pub struct CentralPanel {
+    margin: Option<f32>,
+}
 
 impl CentralPanel {
+    /// Space between the panel's edges and its content, instead of the
+    /// style's `window_margin` (e.g. 0 for a canvas that fills the panel
+    /// from edge to edge).
+    pub fn margin(mut self, margin: f32) -> Self {
+        self.margin = Some(margin);
+        self
+    }
+
     /// Shows the central panel and its content.
     pub fn show<R>(self, root: &mut impl UiRoot, add_contents: impl FnOnce(&mut Ui<'_>) -> R) -> R {
         let (ctx, fonts) = root.parts();
         let rect = ctx.available_rect();
-        let margin = ctx.style().spacing.window_margin;
+        let margin = self.margin.unwrap_or(ctx.style().spacing.window_margin);
         ctx.set_available_rect(Rect::from_min_size(rect.min, Vec2::ZERO));
         ctx.ui(rect.expand(-margin), fonts, |ui| {
             ui.set_clip_rect(rect);
@@ -628,7 +651,9 @@ impl ScrollArea {
         let stride = (row_height + spacing).max(1.0);
         self.show_viewport(ui, |ui, viewport| {
             let first = ((viewport.min.y / stride).floor().max(0.0) as usize).min(total_rows);
-            let last = ((viewport.max.y / stride).ceil().max(0.0) as usize + 1).min(total_rows);
+            let last = ((viewport.max.y / stride).ceil().max(0.0) as usize)
+                .saturating_add(1)
+                .min(total_rows);
             let top = ui.max_rect().min.y;
             // Rows before the visible ones only take space.
             ui.set_cursor_y(top + first as f32 * stride);
@@ -733,7 +758,15 @@ impl ScrollArea {
         );
         let saved_clip = ui.clip_rect();
         ui.set_clip_rect(inner);
-        let visible = Rect::from_min_size(point(state.offset.x, state.offset.y), inner.size());
+        // What can be seen: the viewport, limited by the clipping of the
+        // parent (an area without a height limit inside another scroll
+        // area is as tall as its content, but only part of it shows).
+        let shown = ui.clip_rect();
+        let visible = if shown.is_empty() {
+            Rect::from_min_size(point(state.offset.x, state.offset.y), Vec2::ZERO)
+        } else {
+            Rect::from_min_max(shown.min - origin.to_vec2(), shown.max - origin.to_vec2())
+        };
         let content = ui.scope_with_no_advance(content_max, Layout::top_down(Align::Min), |ui| {
             add_contents(ui, visible)
         });

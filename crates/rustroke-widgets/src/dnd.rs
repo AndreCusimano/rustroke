@@ -7,7 +7,7 @@ use std::sync::Arc;
 use rustroke_core::{Rect, Stroke, Vec2};
 
 use crate::context::Order;
-use crate::{CursorIcon, Id, InnerResponse, LayerId, Sense, Ui};
+use crate::{CursorIcon, Id, InnerResponse, LayerId, Response, Sense, Ui};
 
 /// Pointer movement (points) before pressing a widget inside a drag
 /// source starts dragging it.
@@ -108,6 +108,50 @@ impl Ui<'_> {
             inner: content.inner,
             response,
         }
+    }
+
+    /// Makes an existing widget a drag source, without changing the
+    /// layout (unlike [`Ui::dnd_drag_source`]): once the widget of
+    /// `response` is pressed and the pointer moves a little (or its drag
+    /// starts, for widgets that sense drags), a drag carrying `payload`
+    /// starts, which [`Ui::dnd_drop_zone`] or [`crate::Context::take_dnd_payload`]
+    /// receive. Nothing is drawn at the pointer: draw a preview if needed,
+    /// e.g. while [`crate::Context::dnd_source_id`] is this widget's id.
+    /// Returns whether this widget's payload is being dragged.
+    ///
+    /// ```ignore
+    /// let response = ui.interact(id, node_rect, Sense::CLICK);
+    /// ui.dnd_set_payload(&response, node.key);
+    /// ```
+    pub fn dnd_set_payload<P: Any + Send + Sync>(
+        &mut self,
+        response: &Response,
+        payload: P,
+    ) -> bool {
+        let id = response.id;
+        if self.ctx().dnd_source_id() == Some(id) {
+            self.ctx().set_cursor(CursorIcon::Grabbing);
+            return true;
+        }
+        if self.ctx().is_dnd_active() {
+            return false;
+        }
+        let pointer = self.input().pointer.clone();
+        let origin = pointer.press_origin();
+        let pressed_here = self.ctx().active_id() == Some(id)
+            && pointer.primary_down()
+            && pointer
+                .pos()
+                .zip(origin)
+                .is_some_and(|(p, o)| (p - o).length() > DRAG_THRESHOLD);
+        if !(response.drag_started() || pressed_here) {
+            return false;
+        }
+        let grab = origin.unwrap_or(response.rect.min) - response.rect.min;
+        self.ctx().start_dnd(id, Arc::new(payload), grab);
+        self.ctx().set_cursor(CursorIcon::Grabbing);
+        self.ctx().request_repaint();
+        true
     }
 
     /// An area things can be dropped on: while a `P` is dragged it is

@@ -20,7 +20,7 @@ keep in sync.
 
 ```toml
 [dependencies]
-rustroke = "0.17"
+rustroke = "0.18"
 ```
 
 A window with a label, in a couple of lines:
@@ -136,7 +136,7 @@ Panel::left("tree").show(frame, |ui| {
         ui.label("Screws");
     });
 });
-CentralPanel.show(frame, |ui| {
+CentralPanel::default().show(frame, |ui| {
     ui.heading("Housing");
     let grid = Grid::new("props").striped(true);
     grid.show(ui, |ui| {
@@ -406,8 +406,8 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.17: widgets, layouts (including flexbox and grids), tables and
-trees, rich text and Markdown, gradients and shadows, drag and drop, saved
+Version 0.18: widgets, layouts (including flexbox and grids), tables and
+trees, code editing, rich text and Markdown, gradients and shadows, drag and drop, saved
 state, accessibility, desktop and browser builds. Everything is tested
 (interaction tests without a window, GPU and software snapshot tests, CI on
 macOS, Windows, Linux and WebAssembly). Known limitations are listed in the

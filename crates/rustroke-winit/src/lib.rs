@@ -44,6 +44,12 @@ pub struct WindowOptions {
     pub title: String,
     /// Initial inner size in logical (DPI-independent) points.
     pub inner_size: (f64, f64),
+    /// Whether the user can resize the window (default `true`).
+    pub resizable: bool,
+    /// Smallest inner size the user can resize the window to, in points.
+    pub min_inner_size: Option<(f64, f64)>,
+    /// Largest inner size the user can resize the window to, in points.
+    pub max_inner_size: Option<(f64, f64)>,
     /// On macOS, a transparent title bar with the content extending under
     /// it: the app draws its own top bar (menus, document name) next to
     /// the window buttons, leaving the first [`Frame::titlebar_height`]
@@ -63,6 +69,9 @@ impl Default for WindowOptions {
         Self {
             title: "rustroke app".to_owned(),
             inner_size: (800.0, 600.0),
+            resizable: true,
+            min_inner_size: None,
+            max_inner_size: None,
             unified_titlebar: false,
             persistence_id: None,
         }
@@ -275,7 +284,7 @@ impl Frame<'_> {
     /// (`Panel::top(..).show(frame, ..)`) before calling this. Widgets are
     /// drawn on top of everything in [`Frame::shapes`].
     pub fn ui<R>(&mut self, add_contents: impl FnOnce(&mut Ui<'_>) -> R) -> R {
-        CentralPanel.show(self, add_contents)
+        CentralPanel::default().show(self, add_contents)
     }
 
     /// Mouse, keyboard and timing input for this frame.
@@ -567,7 +576,16 @@ impl WindowState {
         let attributes = Window::default_attributes()
             .with_title(&options.title)
             .with_inner_size(LogicalSize::new(w, h))
+            .with_resizable(options.resizable)
             .with_visible(false);
+        let attributes = match options.min_inner_size {
+            Some((w, h)) => attributes.with_min_inner_size(LogicalSize::new(w, h)),
+            None => attributes,
+        };
+        let attributes = match options.max_inner_size {
+            Some((w, h)) => attributes.with_max_inner_size(LogicalSize::new(w, h)),
+            None => attributes,
+        };
         #[cfg(target_os = "macos")]
         let attributes = {
             use winit::platform::macos::WindowAttributesExtMacOS;

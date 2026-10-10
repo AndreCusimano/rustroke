@@ -141,7 +141,7 @@ impl App for Demo {
                 });
         });
 
-        CentralPanel.show(frame, |ui| {
+        CentralPanel::default().show(frame, |ui| {
             let Some(feature) = self.features.get_mut(self.selected) else {
                 ui.label("No feature selected");
                 return;

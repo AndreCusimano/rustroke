@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-10-10
+
+### Added
+
+- **Code editing in `TextEdit`**: `font(TextStyle)` picks the text style
+  of a field (e.g. monospace); `code_editor()` makes Tab insert spaces up
+  to the next tab stop or indent the selected lines, and Shift+Tab
+  outdent them, instead of moving the focus; `wrap(false)` keeps long
+  lines whole (the field grows sideways inside a `ScrollArea::both`, or
+  scrolls its text where the width is limited); `layouter(..)` turns the
+  text into a `LayoutJob` for syntax colors, keeping cursor, selection
+  and input methods; `line_numbers(true)` shows a margin with line
+  numbers; `highlight_line(line, color, LineHighlight)` marks a line with
+  a background or a wavy underline. The `text_input` example has a code
+  editor.
+- `TextEdit::set_selection` / `TextEdit::selection` move or read the
+  cursor of a field from code (the field scrolls to it), with
+  `TextEdit::line_column_to_index` / `index_to_line_column` for line and
+  column positions.
+- `CentralPanel::margin` and `Panel::margin`: a margin for one panel
+  instead of the style's.
+- `WindowOptions::resizable`, `min_inner_size` and `max_inner_size` for
+  native windows.
+- `Ui::menu_button_with_icon` and `Ui::menu_button_with(Button, ..)`:
+  menu bar entries and submenus with an icon.
+- `Ui::dnd_set_payload(&response, payload)` starts a drag and drop from
+  any widget (e.g. a click-only overlay on a canvas) without changing the
+  layout; `Context::dnd_source_id` tells which widget is dragged.
+- Keyboard-moved cursors of multi-line fields are kept visible in the
+  scroll areas around them.
+
+### Changed
+
+- `CentralPanel` has options now: write `CentralPanel::default().show(..)`
+  instead of `CentralPanel.show(..)`.
+- `WindowOptions` has new fields; build it with `..Default::default()`.
+
+### Fixed
+
+- `ScrollArea::show_rows` (and so `Tree`) inside another scroll area no
+  longer overflows; it adds only the rows visible through the outer area.
+
 ## [0.17.1] — 2026-10-10
 
 ### Fixed
@@ -586,7 +628,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/AndreCusimano/rustroke/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/AndreCusimano/rustroke/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/AndreCusimano/rustroke/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/AndreCusimano/rustroke/compare/v0.15.0...v0.16.0

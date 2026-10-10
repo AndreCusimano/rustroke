@@ -576,7 +576,7 @@ fn panels_take_space_from_the_central_area() {
                 .show(h, |ui| ui.label("side"))
                 .response
                 .rect;
-            out.2 = CentralPanel.show(h, |ui| ui.label("main").rect);
+            out.2 = CentralPanel::default().show(h, |ui| ui.label("main").rect);
         });
         out
     };
@@ -621,7 +621,7 @@ fn window_over_button(
     let mut out = None;
     let mut window = None;
     h.frame_with(events, |h| {
-        out = Some(CentralPanel.show(h, |ui| {
+        out = Some(CentralPanel::default().show(h, |ui| {
             ui.add_sized(vec2(300.0, 200.0), crate::Button::new("big"))
         }));
         window = Window::new("Tools")
@@ -3608,7 +3608,7 @@ fn ui_state_survives_save_and_load() {
                 .show(h, |ui| ui.label("Side"))
                 .response
                 .rect;
-            CentralPanel.show(h, |ui| {
+            CentralPanel::default().show(h, |ui| {
                 out.2 = CollapsingHeader::new("Details")
                     .show(ui, |ui| ui.label("Inside"))
                     .open;
@@ -3930,4 +3930,286 @@ fn drag_sources_made_of_buttons_can_be_dragged() {
     run(&mut h, vec![move_to(zone)], &mut dropped);
     run(&mut h, vec![button(zone, false)], &mut dropped);
     assert_eq!(dropped, Some(7));
+}
+
+// ---- Code editing (TextEdit options, nested scrolling, panel margins) ----
+
+/// A frame with a multi-line code editor `id`, focused.
+fn code_frame(
+    h: &mut Harness,
+    s: &mut String,
+    events: Vec<Event>,
+    id: crate::Id,
+) -> (Response, FrameOutput) {
+    let mut response = None;
+    let out = h.frame(events, |ui| {
+        response = Some(ui.add(crate::TextEdit::multiline(s).code_editor().id(id)));
+    });
+    (response.unwrap(), out)
+}
+
+#[test]
+fn code_editor_tab_indents_instead_of_moving_focus() {
+    let mut h = Harness::new();
+    let id = crate::Id::new("code");
+    let mut s = String::from("ab\ncd");
+    h.ctx.request_focus(id);
+    code_frame(&mut h, &mut s, vec![], id);
+    crate::TextEdit::set_selection(&mut h.ctx, id, 1, 1);
+    let (r, _) = code_frame(&mut h, &mut s, vec![press_key(Key::Tab)], id);
+    assert!(r.has_focus());
+    // From column 1 to the next tab stop.
+    assert_eq!(s, "a   b\ncd");
+
+    // With lines selected, Tab indents them all and Shift+Tab undoes it.
+    code_frame(&mut h, &mut s, vec![command(Key::A)], id);
+    code_frame(&mut h, &mut s, vec![press_key(Key::Tab)], id);
+    assert_eq!(s, "    a   b\n    cd");
+    let (r, _) = code_frame(&mut h, &mut s, vec![key(Key::Tab, Modifiers::SHIFT)], id);
+    assert_eq!(s, "a   b\ncd");
+    assert!(r.has_focus());
+    assert_eq!(crate::TextEdit::selection(&h.ctx, id), Some((0, s.len())));
+
+    // Escape still leaves the field.
+    let (r, _) = code_frame(&mut h, &mut s, vec![press_key(Key::Escape)], id);
+    assert!(r.lost_focus());
+}
+
+#[test]
+fn set_selection_places_the_cursor_and_scrolls_to_it() {
+    let mut h = Harness::new();
+    let id = crate::Id::new("long");
+    let mut s: String = (0..60).map(|i| format!("line {i}\n")).collect();
+    let run = |h: &mut Harness, s: &mut String, events| {
+        let mut rect = None;
+        h.frame(events, |ui| {
+            crate::ScrollArea::vertical()
+                .max_height(100.0)
+                .show(ui, |ui| {
+                    rect = Some(ui.add(crate::TextEdit::multiline(s).id(id)).rect);
+                });
+        });
+        rect.unwrap()
+    };
+    let top = run(&mut h, &mut s, vec![]).min.y;
+    let index = crate::TextEdit::line_column_to_index(&s, 40, 5);
+    crate::TextEdit::set_selection(&mut h.ctx, id, index, index);
+    h.ctx.request_focus(id);
+    run(&mut h, &mut s, vec![]);
+    let scrolled = run(&mut h, &mut s, vec![]).min.y;
+    assert!(
+        scrolled < top - 400.0,
+        "line 40 brought into view: {scrolled}"
+    );
+    run(&mut h, &mut s, vec![text("X")]);
+    assert!(s.contains("line X40"), "typed at line 40, column 5");
+}
+
+#[test]
+fn unwrapped_fields_keep_long_lines_whole() {
+    let mut h = Harness::new();
+    let long = "word ".repeat(40);
+    let mut sizes = Vec::new();
+    for wrap in [true, false] {
+        let mut s = long.clone();
+        let mut rect = None;
+        h.frame(vec![], |ui| {
+            crate::ScrollArea::both().max_width(200.0).show(ui, |ui| {
+                let field = crate::TextEdit::multiline(&mut s)
+                    .desired_width(200.0)
+                    .desired_rows(1)
+                    .wrap(wrap);
+                rect = Some(ui.add(field).rect);
+            });
+        });
+        sizes.push(rect.unwrap().size());
+    }
+    assert!(sizes[0].y > sizes[1].y, "wrapped is taller: {sizes:?}");
+    assert!(sizes[1].x > 400.0, "unwrapped grows to the line: {sizes:?}");
+}
+
+#[test]
+fn layouter_colors_the_text() {
+    use rustroke_core::Color;
+    let mut h = Harness::new();
+    let red = Color::from_srgb8(255, 0, 0);
+    let mut s = String::from("let x");
+    h.frame(vec![], |ui| {
+        let field = crate::TextEdit::multiline(&mut s).layouter(|text| {
+            let mut job = rustroke_text::LayoutJob::default();
+            job.append(&text[..3], rustroke_text::TextFormat::new().color(red));
+            job.append(&text[3..], rustroke_text::TextFormat::new());
+            job
+        });
+        ui.add(field);
+    });
+    let colored = h.shapes.shapes().iter().any(|s| match &s.shape {
+        rustroke_core::Shape::Text { galley, .. } => {
+            galley.glyphs.iter().any(|g| g.color == Some(red))
+        }
+        _ => false,
+    });
+    assert!(colored);
+}
+
+#[test]
+fn line_numbers_and_highlights_are_drawn() {
+    let mut h = Harness::new();
+    let mut s = String::from("a\nb\nc");
+    let count = |h: &mut Harness, s: &mut String, numbers: bool| {
+        h.frame(vec![], |ui| {
+            let mut field = crate::TextEdit::multiline(s).line_numbers(numbers);
+            if numbers {
+                let red = rustroke_core::Color::from_srgb8(255, 0, 0);
+                field = field
+                    .highlight_line(1, red, crate::LineHighlight::Background)
+                    .highlight_line(2, red, crate::LineHighlight::Underline);
+            }
+            ui.add(field);
+        });
+        h.shapes.shapes().len()
+    };
+    let plain = count(&mut h, &mut s, false);
+    // Three numbers, the gutter line, a background and an underline.
+    assert_eq!(count(&mut h, &mut s, true), plain + 6);
+}
+
+#[test]
+fn line_and_column_conversions() {
+    use crate::TextEdit;
+    let t = "ab\nçd\n";
+    assert_eq!(TextEdit::line_column_to_index(t, 0, 1), 1);
+    assert_eq!(TextEdit::line_column_to_index(t, 1, 1), 5);
+    assert_eq!(
+        TextEdit::line_column_to_index(t, 1, 9),
+        6,
+        "end of the line"
+    );
+    assert_eq!(TextEdit::line_column_to_index(t, 2, 0), 7);
+    assert_eq!(TextEdit::line_column_to_index(t, 9, 0), t.len());
+    assert_eq!(TextEdit::index_to_line_column(t, 5), (1, 1));
+    assert_eq!(TextEdit::index_to_line_column(t, 7), (2, 0));
+}
+
+#[test]
+fn rows_inside_another_scroll_area_only_add_the_visible_ones() {
+    let mut h = Harness::new();
+    let mut added = Vec::new();
+    for _ in 0..3 {
+        added.clear();
+        h.frame(vec![], |ui| {
+            crate::ScrollArea::vertical()
+                .max_height(100.0)
+                .show(ui, |ui| {
+                    crate::ScrollArea::vertical().id_salt("inner").show_rows(
+                        ui,
+                        20.0,
+                        1000,
+                        |ui, rows| {
+                            for i in rows {
+                                added.push(i);
+                                ui.label(format!("Row {i}"));
+                            }
+                        },
+                    );
+                });
+        });
+    }
+    assert!(!added.is_empty() && added.len() < 10, "{added:?}");
+}
+
+#[test]
+fn panels_can_have_their_own_margin() {
+    let mut h = Harness::new();
+    let mut out = (None, None);
+    h.frame_with(vec![], |h| {
+        out.0 = Some(
+            crate::Panel::left("side")
+                .margin(0.0)
+                .show(h, |ui| ui.label("side").rect)
+                .inner,
+        );
+        out.1 = Some(
+            crate::CentralPanel::default()
+                .margin(0.0)
+                .show(h, |ui| ui.label("main").rect),
+        );
+    });
+    let (side, main) = (out.0.unwrap(), out.1.unwrap());
+    assert_eq!(side.min, SCREEN.min);
+    assert_eq!(main.min.y, SCREEN.min.y);
+    assert!((main.min.x - 200.0).abs() < 1.0, "{main:?}");
+}
+
+#[test]
+fn menus_and_submenus_can_have_icons() {
+    let mut h = Harness::new();
+    let icon = h.fonts.add_svg_icon(TEST_ICON).unwrap();
+    let run = |h: &mut Harness, events| {
+        let mut out = (None, None);
+        h.frame(events, |ui| {
+            let r = ui.menu_button_with_icon(icon, "File", |ui| {
+                ui.menu_button_with_icon(icon, "Recent", |ui| ui.button("a.txt").clone())
+            });
+            out = (Some(r.response), r.inner);
+        });
+        (out.0.unwrap(), out.1)
+    };
+    let (menu, _) = run(&mut h, vec![]);
+    let m = menu.rect.center();
+    run(&mut h, vec![button(m, true), button(m, false)]);
+    let (_, sub) = run(&mut h, vec![]);
+    let recent = sub.unwrap().response.rect.center();
+    run(&mut h, vec![move_to(recent)]);
+    let (_, sub) = run(&mut h, vec![]);
+    assert!(sub.unwrap().inner.is_some(), "submenu open");
+}
+
+#[test]
+fn any_widget_can_start_a_drag() {
+    let mut h = Harness::new();
+    let mut dropped = None;
+    let mut dragging = false;
+    let run = |h: &mut Harness, events, dropped: &mut Option<u32>, dragging: &mut bool| {
+        h.frame(events, |ui| {
+            // A click-only overlay, like a node on a canvas.
+            let rect = Rect::from_min_size(point(20.0, 20.0), vec2(60.0, 30.0));
+            let node = ui.interact(crate::Id::new("node"), rect, crate::Sense::CLICK);
+            *dragging = ui.dnd_set_payload(&node, 3_u32);
+            ui.add_space(80.0);
+            let (_, d) = ui.dnd_drop_zone::<u32, _>(|ui| {
+                ui.add_sized(vec2(200.0, 60.0), crate::Label::new("Zone"));
+            });
+            if let Some(d) = d {
+                *dropped = Some(*d);
+            }
+        });
+    };
+    run(&mut h, vec![], &mut dropped, &mut dragging);
+    let node = point(40.0, 30.0);
+    let zone = h.ctx.find_widget("Zone").unwrap().rect.center();
+    run(
+        &mut h,
+        vec![move_to(node), button(node, true)],
+        &mut dropped,
+        &mut dragging,
+    );
+    assert!(!dragging, "a press alone doesn't drag");
+    run(
+        &mut h,
+        vec![move_to(node + vec2(10.0, 0.0))],
+        &mut dropped,
+        &mut dragging,
+    );
+    assert!(dragging);
+    assert_eq!(h.ctx.dnd_source_id(), Some(crate::Id::new("node")));
+    run(&mut h, vec![move_to(zone)], &mut dropped, &mut dragging);
+    run(
+        &mut h,
+        vec![button(zone, false)],
+        &mut dropped,
+        &mut dragging,
+    );
+    assert_eq!(dropped, Some(3));
+    assert!(!h.ctx.is_dnd_active());
 }

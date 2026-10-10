@@ -61,7 +61,10 @@
 //! - **Widgets**: [`Ui::label`], [`Ui::button`], [`Ui::checkbox`],
 //!   [`Ui::radio_value`], [`Ui::selectable_value`], [`Slider`],
 //!   [`DragValue`] (drag or type a number), [`ComboBox`] (drop-down list),
-//!   [`TextEdit`] (also for passwords), [`SearchField`], [`Hyperlink`],
+//!   [`TextEdit`] (also for passwords, and code: [`TextEdit::font`],
+//!   [`TextEdit::code_editor`], [`TextEdit::layouter`] for syntax colors,
+//!   [`TextEdit::line_numbers`], [`TextEdit::highlight_line`],
+//!   [`TextEdit::set_selection`]), [`SearchField`], [`Hyperlink`],
 //!   [`Image`], [`Icon`], [`IconToggle`] (two-state icon, e.g. an eye),
 //!   [`ProgressBar`], [`Spinner`], [`List`] (rows to select and reorder
 //!   by dragging), [`Table`] (sortable, resizable columns; millions of
@@ -83,7 +86,8 @@
 //!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
 //!   modal dialogs ([`Modal`]), [`ScrollArea`] (vertical, horizontal or
 //!   both; [`ScrollArea::show_rows`] lays out only the visible rows,
-//!   [`Ui::scroll_to_rect`] brings something into view), popup menus with submenus ([`Ui::menu_button`]; also below any
+//!   [`Ui::scroll_to_rect`] brings something into view), popup menus with submenus ([`Ui::menu_button`], with an icon
+//!   [`Ui::menu_button_with_icon`]; also below any
 //!   rectangle: [`Ui::popup_below`]), context menus
 //!   ([`Response::context_menu`]), collapsible sections and trees
 //!   ([`CollapsingHeader`]), tab bars ([`TabBar`]), dockable panels
@@ -144,8 +148,10 @@
 //!   the window open (e.g. to ask about unsaved changes), and
 //!   [`Frame::close`] closes it once answered. On macOS,
 //!   [`WindowOptions::unified_titlebar`] lets the app draw its own top bar
-//!   next to the window buttons.
-//! - **Drag and drop**: [`Ui::dnd_drag_source`] and [`Ui::dnd_drop_zone`]
+//!   next to the window buttons. [`WindowOptions::resizable`] and
+//!   [`WindowOptions::min_inner_size`] limit resizing.
+//! - **Drag and drop**: [`Ui::dnd_drag_source`] (or
+//!   [`Ui::dnd_set_payload`] on any widget) and [`Ui::dnd_drop_zone`]
 //!   move payloads of any type between widgets; files dropped from the
 //!   system arrive in [`InputState::dropped_files`]; pinch and rotation
 //!   gestures in [`InputState::zoom_delta`] and `rotation_delta`.
@@ -205,12 +211,13 @@ pub use rustroke_widgets::{
     CollapsingHeader, CollapsingResponse, ColorPicker, Column, ComboBox, Context, CursorIcon, Date,
     DatePicker, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
     FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout,
-    List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide, ProgressBar,
-    PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle, Response, ScrollArea,
-    SearchField, SelectableLabel, Sense, Separator, Slider, SortOrder, Spinner, SplitAxis, Style,
-    TabBar, TabBarResponse, TabLabel, Table, TableResponse, TextEdit, TextureHandle, TimePicker,
-    Toast, ToastLevel, ToolButton, ToolButtonResponse, Tree, TreeResponse, Ui, UiRoot, Visuals,
-    Widget, WidgetDescription, WidgetInfo, WidgetRole, Window, show_inspector, show_toasts,
+    LineHighlight, List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide,
+    ProgressBar, PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle,
+    Response, ScrollArea, SearchField, SelectableLabel, Sense, Separator, Slider, SortOrder,
+    Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, Table, TableResponse, TextEdit,
+    TextureHandle, TimePicker, Toast, ToastLevel, ToolButton, ToolButtonResponse, Tree,
+    TreeResponse, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
+    show_inspector, show_toasts,
 };
 pub use rustroke_widgets::{
     Flex, FlexAlign, FlexDirection, FlexGrid, FlexItem, FlexJustify, FlexUi, GridCell, GridUi,

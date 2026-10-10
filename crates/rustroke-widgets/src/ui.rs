@@ -845,10 +845,32 @@ impl<'a> Ui<'a> {
         text: impl Into<String>,
         add_contents: impl FnOnce(&mut Ui<'_>) -> R,
     ) -> InnerResponse<Option<R>> {
+        self.menu_button_with(Button::new(text), add_contents)
+    }
+
+    /// A [`Ui::menu_button`] with `icon` before the text (menu bars, and
+    /// submenus inside a menu).
+    pub fn menu_button_with_icon<R>(
+        &mut self,
+        icon: IconId,
+        text: impl Into<String>,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<Option<R>> {
+        self.menu_button_with(Button::new(text).icon(icon), add_contents)
+    }
+
+    /// A [`Ui::menu_button`] showing `button` (text, icon, size, accessible
+    /// label). Its frame follows the menu style: none in a menu bar; a
+    /// submenu also gets the ▸ shortcut text.
+    pub fn menu_button_with<R>(
+        &mut self,
+        button: Button,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<Option<R>> {
         if self.in_menu.is_some() {
-            return self.submenu_button(text, add_contents);
+            return self.submenu_button(button, add_contents);
         }
-        let response = self.add(Button::new(text).menu_style(self.layout.is_horizontal()));
+        let response = self.add(button.menu_style(self.layout.is_horizontal()));
         let id = response.id;
         if response.clicked() {
             if self.ctx.is_popup_open(id) {
@@ -868,10 +890,10 @@ impl<'a> Ui<'a> {
     /// clicked (`menu_button` inside a menu).
     fn submenu_button<R>(
         &mut self,
-        text: impl Into<String>,
+        button: Button,
         add_contents: impl FnOnce(&mut Ui<'_>) -> R,
     ) -> InnerResponse<Option<R>> {
-        let mut button = Button::new(text).shortcut_text("▸");
+        let mut button = button.shortcut_text("▸");
         button.opens_submenu = true;
         let response = self.add(button);
         let id = response.id;

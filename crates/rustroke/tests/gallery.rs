@@ -74,7 +74,7 @@ fn gallery() {
                     ui.label("Screws");
                 });
         });
-        CentralPanel.show(frame, |ui| {
+        CentralPanel::default().show(frame, |ui| {
             ui.heading("Housing");
             Grid::new("properties").striped(true).show(ui, |ui| {
                 ui.label("Material");

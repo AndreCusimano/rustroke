@@ -417,7 +417,7 @@ fn containers_scene(
             .show(&mut root, |ui| {
                 ui.label("Side panel");
             });
-        CentralPanel.show(&mut root, |ui| {
+        CentralPanel::default().show(&mut root, |ui| {
             ui.add_space(170.0);
             *button_rect = ui.button("Hover me").on_hover_text(ui, "A tooltip").rect;
         });
@@ -738,7 +738,7 @@ fn properties_scene(fonts: &mut Fonts, pixels_per_point: f32) -> DisplayList {
                     });
                 ui.add(ProgressBar::new(3.0 / 7.0).text("3/7"));
             });
-        CentralPanel.show(&mut root, |ui| {
+        CentralPanel::default().show(&mut root, |ui| {
             Grid::new("props").show(ui, |ui| {
                 ui.label("Length");
                 ui.add(DragValue::new(&mut length).speed(0.5).suffix(" mm"));
@@ -834,7 +834,7 @@ fn lists_scene(fonts: &mut Fonts, pixels_per_point: f32) -> DisplayList {
                 ui.label(*item);
             });
         });
-        CentralPanel.show(&mut root, |ui| {
+        CentralPanel::default().show(&mut root, |ui| {
             ui.add(Button::new("Hole").icon(icon).selected(true));
             ui.add(Button::new("Hole").icon(icon));
             ui.label("Symbols: ↶ ↷ ⚓ ∥ ⊥ ⌀ ✓");
@@ -1079,7 +1079,7 @@ fn inspector_scene(fonts: &mut Fonts, pixels_per_point: f32) -> DisplayList {
                     });
             });
         let (ctx, fonts) = root.parts();
-        CentralPanel.show(&mut (&mut *ctx, &mut *fonts), |_| {});
+        CentralPanel::default().show(&mut (&mut *ctx, &mut *fonts), |_| {});
         let mut output = ctx.end_frame();
         list = std::mem::take(&mut output.shapes);
         arrow

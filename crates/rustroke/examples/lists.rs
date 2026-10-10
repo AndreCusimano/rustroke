@@ -257,7 +257,7 @@ impl App for Demo {
             }
         });
 
-        CentralPanel.show(frame, |ui| {
+        CentralPanel::default().show(frame, |ui| {
             ui.label(format!(
                 "{} selected · {}",
                 self.selection.len(),

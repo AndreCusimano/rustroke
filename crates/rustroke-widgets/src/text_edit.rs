@@ -3,9 +3,12 @@
 use rustroke_core::{
     Color, Event, Galley, ImeEvent, Key, Modifiers, Point, Rect, Stroke, Vec2, point, vec2,
 };
+use rustroke_text::{LayoutJob, TextStyle};
 
 use crate::widgets::{FrameOverride, frame_setters};
-use crate::{CursorIcon, FocusLost, Id, Response, Sense, Ui, Widget, WidgetInfo, WidgetRole};
+use crate::{
+    Context, CursorIcon, FocusLost, Id, Response, Sense, Ui, Widget, WidgetInfo, WidgetRole,
+};
 
 /// Seconds the text cursor stays visible, then hidden, while blinking.
 const BLINK_HALF_PERIOD: f64 = 0.5;
@@ -31,6 +34,9 @@ struct TextEditState {
     /// After a double (words) or triple (lines) click: the unit and the
     /// range first selected, which dragging extends by whole units.
     unit_selection: Option<(SelectUnit, usize, usize)>,
+    /// The cursor was placed by code ([`TextEdit::set_selection`]): bring
+    /// it into view next time the field is shown.
+    scroll_to_cursor: bool,
 }
 
 /// The character shown for every character of a password.
@@ -47,11 +53,19 @@ fn mask(text: &str) -> String {
 fn layout_field(
     ui: &mut Ui<'_>,
     text: &str,
-    style: &rustroke_text::TextStyle,
+    style: &TextStyle,
     wrap: Option<f32>,
     password: bool,
+    layouter: Option<&Layouter<'_>>,
 ) -> std::sync::Arc<Galley> {
     if !password {
+        if let Some(layouter) = layouter {
+            let job = (layouter.0)(text);
+            // A job for some other text would break the cursor positions.
+            if job.text == text {
+                return ui.layout_job(&job, style, wrap);
+            }
+        }
         return ui.layout_text(text, style, wrap);
     }
     let masked = ui.layout_text(&mask(text), style, wrap);
@@ -69,6 +83,27 @@ fn layout_field(
     }
     std::sync::Arc::new(galley)
 }
+
+/// Turns the text of a field into rich text (see [`TextEdit::layouter`]).
+struct Layouter<'t>(Box<dyn Fn(&str) -> LayoutJob + 't>);
+
+impl std::fmt::Debug for Layouter<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Layouter")
+    }
+}
+
+/// How [`TextEdit::highlight_line`] marks a line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineHighlight {
+    /// A background across the whole width of the field.
+    Background,
+    /// A wavy line under the text of the line (e.g. an error).
+    Underline,
+}
+
+/// Spaces inserted by Tab in a code editor.
+const INDENT: &str = "    ";
 
 /// What a multiple click selects.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -237,7 +272,7 @@ fn undo_shortcut(key: Key, modifiers: Modifiers) -> Option<bool> {
 }
 
 /// What kind of edit `event` would make, if any.
-fn edit_kind(event: &Event, multiline: bool) -> Option<EditKind> {
+fn edit_kind(event: &Event, multiline: bool, code_editor: bool) -> Option<EditKind> {
     match event {
         Event::Text(_) | Event::Ime(ImeEvent::Commit(_)) => Some(EditKind::Typing),
         Event::Paste(_) | Event::Cut => Some(EditKind::Other),
@@ -251,6 +286,11 @@ fn edit_kind(event: &Event, multiline: bool) -> Option<EditKind> {
             pressed: true,
             ..
         } if multiline => Some(EditKind::Other),
+        Event::Key {
+            key: Key::Tab,
+            pressed: true,
+            ..
+        } if code_editor => Some(EditKind::Other),
         _ => None,
     }
 }
@@ -281,6 +321,12 @@ pub struct TextEdit<'t> {
     /// field (e.g. by `SearchField`).
     pub(crate) inset: [f32; 2],
     password: bool,
+    font: Option<TextStyle>,
+    code_editor: bool,
+    wrap: bool,
+    layouter: Option<Layouter<'t>>,
+    line_numbers: bool,
+    line_highlights: Vec<(usize, Color, LineHighlight)>,
 }
 
 impl<'t> TextEdit<'t> {
@@ -299,6 +345,12 @@ impl<'t> TextEdit<'t> {
             frame_style: FrameOverride::default(),
             inset: [0.0, 0.0],
             password: false,
+            font: None,
+            code_editor: false,
+            wrap: true,
+            layouter: None,
+            line_numbers: false,
+            line_highlights: Vec::new(),
         }
     }
 
@@ -366,16 +418,122 @@ impl<'t> TextEdit<'t> {
         self.desired_rows = rows.max(1);
         self
     }
+
+    /// The text style of the field (e.g. `TextStyle::monospace(13.0)` for
+    /// code) instead of the style's `body`.
+    pub fn font(mut self, style: TextStyle) -> Self {
+        self.font = Some(style);
+        self
+    }
+
+    /// Editing code: while the field has focus, Tab inserts spaces up to
+    /// the next multiple of four columns, or indents the selected lines,
+    /// and Shift+Tab removes one level of indentation, instead of moving
+    /// the focus. Escape still ends editing, so the keyboard can leave the
+    /// field.
+    pub fn code_editor(mut self) -> Self {
+        self.code_editor = true;
+        self
+    }
+
+    /// Whether a multi-line field wraps long lines at its width (default
+    /// `true`). Without wrapping, lines stay whole and the field grows to
+    /// the longest one: put it in a [`crate::ScrollArea::both`] to scroll
+    /// sideways. Where the width is limited the field scrolls its text
+    /// sideways to keep the cursor visible.
+    pub fn wrap(mut self, wrap: bool) -> Self {
+        self.wrap = wrap;
+        self
+    }
+
+    /// Lays the text out as rich text: `layouter` gets the text and
+    /// returns it split into formatted sections (colors, styles), e.g. to
+    /// highlight syntax. The cursor, selection and input methods work as
+    /// usual. The job must hold exactly the text it got, otherwise the
+    /// field falls back to plain text; sections without a style use the
+    /// field's font. Called whenever the field is laid out, so cache the
+    /// result if building it is expensive.
+    pub fn layouter(mut self, layouter: impl Fn(&str) -> LayoutJob + 't) -> Self {
+        self.layouter = Some(Layouter(Box::new(layouter)));
+        self
+    }
+
+    /// Shows the line numbers in a margin on the left of the text (lines
+    /// end at newlines; wrapped rows of a line share its number).
+    pub fn line_numbers(mut self, show: bool) -> Self {
+        self.line_numbers = show;
+        self
+    }
+
+    /// Marks line `line` (counted from 0) with `color`, e.g. the line of
+    /// an error. Call it more than once to mark several lines.
+    pub fn highlight_line(mut self, line: usize, color: Color, kind: LineHighlight) -> Self {
+        self.line_highlights.push((line, color, kind));
+        self
+    }
+
+    /// Selects `anchor..cursor` (byte indices into the text, in any order;
+    /// equal for a plain cursor) in the field with id `id` (see
+    /// [`TextEdit::id`]), and scrolls it into view the next time the field
+    /// is shown. Indices are clamped to the text. Use
+    /// `Context::request_focus` as well to start editing there; see
+    /// [`TextEdit::line_column_to_index`] for positions given as line and column.
+    pub fn set_selection(ctx: &mut Context, id: Id, anchor: usize, cursor: usize) {
+        let mut state: TextEditState = ctx.data(id).unwrap_or_default();
+        state.anchor = anchor;
+        state.cursor = cursor;
+        state.preferred_x = None;
+        state.unit_selection = None;
+        state.scroll_to_cursor = true;
+        ctx.insert_data(id, state);
+        ctx.request_repaint();
+    }
+
+    /// The selection of the field with id `id`, as `(anchor, cursor)`
+    /// byte indices (equal when nothing is selected), or `None` if it has
+    /// not been shown yet.
+    pub fn selection(ctx: &Context, id: Id) -> Option<(usize, usize)> {
+        ctx.data::<TextEditState>(id)
+            .map(|state| (state.anchor, state.cursor))
+    }
+    /// The byte index of `column` (in characters, from 0) on line `line`
+    /// (from 0) of `text`. Positions past the end of a line give its end;
+    /// lines past the end of the text give the end of the text.
+    pub fn line_column_to_index(text: &str, line: usize, column: usize) -> usize {
+        let mut start = 0;
+        for _ in 0..line {
+            match text[start..].find('\n') {
+                Some(i) => start += i + 1,
+                None => return text.len(),
+            }
+        }
+        let end = text[start..].find('\n').map_or(text.len(), |i| start + i);
+        text[start..end]
+            .char_indices()
+            .nth(column)
+            .map_or(end, |(i, _)| start + i)
+    }
+
+    /// The line and column (both from 0, the column in characters) of byte
+    /// `index` of `text`; the reverse of [`TextEdit::line_column_to_index`].
+    pub fn index_to_line_column(text: &str, index: usize) -> (usize, usize) {
+        let index = clamp_to_boundary(text, index);
+        let before = &text[..index];
+        let line = before.matches('\n').count();
+        let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+        (line, text[line_start..index].chars().count())
+    }
 }
 
 impl Widget for TextEdit<'_> {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
         let visuals = &style.visuals;
+        let font = self.font.clone().unwrap_or_else(|| style.body.clone());
         let padding = self.margin;
         let available = ui.available_width();
         let min_width = self.frame_style.min_size.map_or(40.0, |m| m.x);
-        let width = self
+        let mut width = self
             .desired_width
             .unwrap_or(if self.multiline {
                 ui.fill_width(480.0)
@@ -384,10 +542,23 @@ impl Widget for TextEdit<'_> {
             })
             .min(available)
             .max(min_width);
-        let [inset_left, inset_right] = self.inset;
-        let inner_width = width - 2.0 * padding.x - inset_left - inset_right;
-        let row_height = style.body.size * style.body.line_height;
-        let wrap = self.multiline.then_some(inner_width);
+        // Line numbers take a margin on the left, wide enough for the
+        // number of the last line.
+        let gutter = if self.line_numbers {
+            let lines = self.text.matches('\n').count() + 1;
+            let digits = lines.to_string().len().max(2);
+            let digit = ui.layout_text("0", &font, None).size.x;
+            digits as f32 * digit + padding.x
+        } else {
+            0.0
+        };
+        let inset_left = self.inset[0] + gutter;
+        let inset_right = self.inset[1];
+        let row_height = font.size * font.line_height;
+        let wraps = self.multiline && self.wrap;
+        // Single-line fields and fields that don't wrap scroll sideways.
+        let scrolls_x = !wraps;
+        let wrap = wraps.then_some(width - 2.0 * padding.x - inset_left - inset_right);
 
         let id = self.id.unwrap_or_else(|| ui.next_auto_id());
         let mut state: TextEditState = ui.ctx().data(id).unwrap_or_default();
@@ -396,9 +567,16 @@ impl Widget for TextEdit<'_> {
 
         // Size from the current text (before this frame's edits).
         let password = self.password;
+        let layouter = self.layouter.as_ref();
         let layout =
-            |ui: &mut Ui<'_>, text: &str| layout_field(ui, text, &style.body, wrap, password);
+            |ui: &mut Ui<'_>, text: &str| layout_field(ui, text, &font, wrap, password, layouter);
         let galley = layout(ui, self.text);
+        if self.multiline && !self.wrap {
+            // As wide as the longest line, where there is room.
+            let content = galley.size.x + 2.0 * padding.x + inset_left + inset_right + 2.0;
+            width = width.max(content.min(available));
+        }
+        let inner_width = width - 2.0 * padding.x - inset_left - inset_right;
         let content_height = if self.multiline {
             galley.size.y.max(self.desired_rows as f32 * row_height)
         } else {
@@ -460,9 +638,8 @@ impl Widget for TextEdit<'_> {
         }
 
         // Mouse: place the cursor and select by dragging.
-        if (response.drag_started() || response.dragged())
-            && let Some(pos) = ui.input().pointer.pos()
-        {
+        let by_mouse = response.drag_started() || response.dragged();
+        if by_mouse && let Some(pos) = ui.input().pointer.pos() {
             let index = galley.index_at(Point::new(0.0, 0.0) + (pos - text_origin(state.scroll_x)));
             let extend =
                 response.dragged() && !response.drag_started() || ui.input().modifiers.shift;
@@ -502,6 +679,10 @@ impl Widget for TextEdit<'_> {
         // Keyboard and text input, in the order they happened.
         if response.has_focus() {
             ui.ctx().set_keyboard_owner(id);
+            if self.code_editor {
+                // Tab indents instead of moving the focus (next frame).
+                ui.ctx().set_tab_owner(id);
+            }
             let events = ui.input().events.clone();
             let mut galley = std::sync::Arc::clone(&galley);
             let mut history: Option<UndoHistory> = None;
@@ -524,7 +705,7 @@ impl Widget for TextEdit<'_> {
                     }
                     continue;
                 }
-                let kind = edit_kind(&event, self.multiline);
+                let kind = edit_kind(&event, self.multiline, self.code_editor);
                 let before = kind.map(|_| Snapshot::of(self.text, &state));
                 let edited = match event {
                     Event::Text(text) => insert(self.text, &mut state, &text, self.multiline),
@@ -550,6 +731,21 @@ impl Widget for TextEdit<'_> {
                     Event::Ime(ImeEvent::Disabled) => {
                         state.preedit.clear();
                         false
+                    }
+                    Event::Key {
+                        key: Key::Tab,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } if self.code_editor
+                        && (modifiers == Modifiers::NONE || modifiers == Modifiers::SHIFT) =>
+                    {
+                        ui.ctx().input_mut().consume_key(Key::Tab, modifiers);
+                        if modifiers.shift {
+                            outdent(self.text, &mut state)
+                        } else {
+                            indent(self.text, &mut state)
+                        }
                     }
                     Event::Key {
                         key,
@@ -605,7 +801,8 @@ impl Widget for TextEdit<'_> {
                 ui.ctx().insert_data(undo_id, history);
             }
         }
-        if changed || state.cursor != old_cursor {
+        let cursor_moved = changed || state.cursor != old_cursor;
+        if cursor_moved {
             state.last_change = now;
         }
         if !response.has_focus() || response.lost_focus() {
@@ -620,8 +817,8 @@ impl Widget for TextEdit<'_> {
         }
         let galley = layout(ui, &display);
 
-        // Single-line fields scroll sideways to keep the cursor visible.
-        if !self.multiline {
+        // Fields that don't wrap scroll sideways to keep the cursor visible.
+        if scrolls_x {
             let cursor_x = galley.cursor_rect(state.cursor + state.preedit.len()).min.x;
             if cursor_x - state.scroll_x > inner_width {
                 state.scroll_x = cursor_x - inner_width;
@@ -634,6 +831,25 @@ impl Widget for TextEdit<'_> {
         }
         let origin = text_origin(state.scroll_x);
         let has_focus = ui.ctx().focused() == Some(id);
+        let caret = offset(
+            galley.cursor_rect(state.cursor + state.preedit.len()),
+            origin,
+        );
+
+        // Scroll areas around the field follow the cursor when it moves by
+        // keys or is placed by code.
+        if state.scroll_to_cursor {
+            state.scroll_to_cursor = false;
+            ui.ctx().scroll_to_rect(
+                Rect::from_min_max(caret.min - vec2(2.0, 0.0), caret.max + vec2(2.0, 0.0)),
+                Some(crate::Align::Center),
+            );
+        } else if has_focus && cursor_moved && !by_mouse {
+            ui.ctx().scroll_to_rect(
+                Rect::from_min_max(caret.min - vec2(2.0, 0.0), caret.max + vec2(2.0, 0.0)),
+                None,
+            );
+        }
 
         // Frame.
         let custom = self.frame_style;
@@ -646,12 +862,82 @@ impl Widget for TextEdit<'_> {
         let radius = custom.corner_radius(visuals.corner_radius);
         ui.painter().rect(rect, radius, fill, stroke);
 
+        // The line each row of the text belongs to.
+        let lines = if self.line_numbers || !self.line_highlights.is_empty() {
+            line_of_rows(&galley, &display)
+        } else {
+            Vec::new()
+        };
+
         let saved_clip = ui.clip_rect();
+        let gutter_right = rect.min.x + inset_left;
+        if gutter > 0.0 {
+            ui.set_clip_rect(rect);
+            let visible = ui.clip_rect();
+            let current = galley.row_of(state.cursor);
+            let x = gutter_right + padding.x / 2.0;
+            ui.painter().line(
+                point(x, rect.min.y),
+                point(x, rect.max.y),
+                visuals.window_stroke,
+            );
+            for (i, row) in galley.rows.iter().enumerate() {
+                let top = origin.y + row.top;
+                let first_row = i == 0 || lines[i] != lines[i - 1];
+                if !first_row || top > visible.max.y || top + row.height < visible.min.y {
+                    continue;
+                }
+                let number = ui.layout_text(&(lines[i] + 1).to_string(), &font, None);
+                let color = if has_focus && lines.get(current) == Some(&lines[i]) {
+                    visuals.text
+                } else {
+                    visuals.weak_text
+                };
+                let pos = point(gutter_right - number.size.x, top);
+                ui.painter().galley(pos, number, color);
+            }
+            ui.clip_rect_restore(saved_clip);
+        }
+
+        let text_left = if gutter > 0.0 {
+            gutter_right + padding.x / 2.0
+        } else {
+            rect.min.x + inset_left
+        };
         let text_clip = Rect::from_min_max(
-            point(rect.min.x + inset_left, rect.min.y),
+            point(text_left, rect.min.y),
             point(rect.max.x - inset_right, rect.max.y),
         );
         ui.set_clip_rect(text_clip.expand(-1.0));
+        for &(line, color, kind) in &self.line_highlights {
+            let rows = galley.rows.iter().zip(&lines).filter(|(_, l)| **l == line);
+            for (row, _) in rows {
+                let top = origin.y + row.top;
+                match kind {
+                    LineHighlight::Background => {
+                        let band = Rect::from_min_max(
+                            point(text_clip.min.x, top),
+                            point(text_clip.max.x, top + row.height),
+                        );
+                        ui.painter().rect_filled(band, 0.0, color);
+                    }
+                    LineHighlight::Underline => {
+                        // Under the text, without the indentation.
+                        let (start, end) = (row.start(), row.end().min(display.len()));
+                        let indent = display
+                            .get(start..end)
+                            .map_or(0, |t| t.len() - t.trim_start().len());
+                        let first = row.x_of(start + indent);
+                        let last = row.x_of(end);
+                        let x0 = origin.x + first.min(last);
+                        let x1 = (origin.x + first.max(last)).max(x0 + 8.0);
+                        let y = top + row.height - 1.5;
+                        ui.painter()
+                            .polyline(wave(x0, x1, y), Stroke::new(1.0, color));
+                    }
+                }
+            }
+        }
         if has_focus {
             let selection = visuals.selection;
             let (a, b) = state.selection();
@@ -660,7 +946,7 @@ impl Widget for TextEdit<'_> {
             }
         }
         if self.text.is_empty() && state.preedit.is_empty() && !has_focus && !self.hint.is_empty() {
-            let hint = ui.layout_text(&self.hint, &style.body, wrap);
+            let hint = ui.layout_text(&self.hint, &font, wrap);
             ui.painter().galley(origin, hint, visuals.weak_text);
         } else {
             ui.painter()
@@ -678,10 +964,6 @@ impl Widget for TextEdit<'_> {
             );
         }
         if has_focus {
-            let caret = offset(
-                galley.cursor_rect(state.cursor + state.preedit.len()),
-                origin,
-            );
             ui.ctx().set_ime_cursor(caret);
             // Blink, restarting whenever the cursor moves.
             let phase = (now - state.last_change) % (2.0 * BLINK_HALF_PERIOD);
@@ -704,6 +986,113 @@ impl Widget for TextEdit<'_> {
         ui.ctx().insert_data(id, state);
         response
     }
+}
+
+/// For every row of `galley`, the line of `text` (counted from 0) it
+/// belongs to: lines end at newlines, wrapped rows share their line.
+fn line_of_rows(galley: &Galley, text: &str) -> Vec<usize> {
+    let mut line = 0;
+    galley
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let start = clamp_to_boundary(text, row.start());
+            if i > 0 && text[..start].ends_with('\n') {
+                line += 1;
+            }
+            line
+        })
+        .collect()
+}
+
+/// A wavy line from `x0` to `x1` around `y` (error underline).
+fn wave(x0: f32, x1: f32, y: f32) -> Vec<Point> {
+    const STEP: f32 = 2.0;
+    let mut points = Vec::new();
+    let mut x = x0;
+    let mut up = false;
+    while x < x1 {
+        points.push(point(x, if up { y - 1.0 } else { y + 1.0 }));
+        up = !up;
+        x += STEP;
+    }
+    points.push(point(x1, if up { y - 1.0 } else { y + 1.0 }));
+    points
+}
+
+/// The starts of the lines the selection touches (just the cursor's line
+/// without a selection). A selection ending at the start of a line
+/// doesn't include that line.
+fn selected_line_starts(text: &str, state: &TextEditState) -> Vec<usize> {
+    let (a, b) = state.selection();
+    let first = text[..a].rfind('\n').map_or(0, |i| i + 1);
+    let mut starts = vec![first];
+    for (i, _) in text[first..b].match_indices('\n') {
+        let start = first + i + 1;
+        if start < b {
+            starts.push(start);
+        }
+    }
+    starts
+}
+
+/// Tab in a code editor: indents the selected lines, or inserts spaces up
+/// to the next tab stop. Returns whether the text changed.
+fn indent(text: &mut String, state: &mut TextEditState) -> bool {
+    let (a, b) = state.selection();
+    let multiple_lines = text[a..b].contains('\n');
+    if !multiple_lines {
+        let line_start = text[..a].rfind('\n').map_or(0, |i| i + 1);
+        let column = text[line_start..a].chars().count();
+        let spaces = INDENT.len() - column % INDENT.len();
+        return insert(text, state, &INDENT[..spaces], true);
+    }
+    for start in selected_line_starts(text, state).into_iter().rev() {
+        text.insert_str(start, INDENT);
+        for index in [&mut state.cursor, &mut state.anchor] {
+            // A selection starting at the start of a line keeps it.
+            if *index > start || (*index == start && *index != a) {
+                *index += INDENT.len();
+            }
+        }
+    }
+    state.preferred_x = None;
+    true
+}
+
+/// Shift+Tab in a code editor: removes one level of indentation (up to
+/// four spaces, or a tab) from the selected lines. Returns whether the
+/// text changed.
+fn outdent(text: &mut String, state: &mut TextEditState) -> bool {
+    let mut changed = false;
+    for start in selected_line_starts(text, state).into_iter().rev() {
+        let rest = &text[start..];
+        let n = if rest.starts_with('\t') {
+            1
+        } else {
+            rest.bytes()
+                .take(INDENT.len())
+                .take_while(|b| *b == b' ')
+                .count()
+        };
+        if n == 0 {
+            continue;
+        }
+        text.replace_range(start..start + n, "");
+        for index in [&mut state.cursor, &mut state.anchor] {
+            if *index > start + n {
+                *index -= n;
+            } else if *index > start {
+                *index = start;
+            }
+        }
+        changed = true;
+    }
+    if changed {
+        state.preferred_x = None;
+    }
+    changed
 }
 
 fn offset(r: Rect, by: Point) -> Rect {

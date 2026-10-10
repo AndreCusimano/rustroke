@@ -332,6 +332,8 @@ struct FrameState {
     described: Vec<WidgetDescription>,
     /// The focused widget takes keyboard input (a text field).
     keyboard_owner: Option<Id>,
+    /// A focused widget that takes Tab itself (a code editor).
+    tab_owner: Option<Id>,
     /// Areas of the top-level Uis (panels, windows, popups).
     ui_areas: Vec<Rect>,
     /// Areas of widgets with a tooltip.
@@ -354,6 +356,7 @@ impl Default for FrameState {
             hover_tracked: false,
             described: Vec::new(),
             keyboard_owner: None,
+            tab_owner: None,
             ui_areas: Vec::new(),
             tooltip_areas: Vec::new(),
             track_pointer: false,
@@ -770,6 +773,12 @@ impl Context {
         self.this_frame.keyboard_owner = Some(id);
     }
 
+    /// The focused widget `id` handles Tab and Shift+Tab itself, so they
+    /// don't move the focus next frame.
+    pub(crate) fn set_tab_owner(&mut self, id: Id) {
+        self.this_frame.tab_owner = Some(id);
+    }
+
     /// Mouse cursor to show for this frame (the last call wins).
     pub fn set_cursor(&mut self, cursor: CursorIcon) {
         self.this_frame.output.cursor = cursor;
@@ -879,10 +888,11 @@ impl Context {
             self.inspector_open = !self.inspector_open;
         }
 
-        if self.input.consume_key(Key::Tab, Modifiers::NONE) {
+        let takes_tab = self.focused.is_some() && self.focused == self.prev_frame.tab_owner;
+        if !takes_tab && self.input.consume_key(Key::Tab, Modifiers::NONE) {
             self.move_focus(true);
         }
-        if self.input.consume_key(Key::Tab, Modifiers::SHIFT) {
+        if !takes_tab && self.input.consume_key(Key::Tab, Modifiers::SHIFT) {
             self.move_focus(false);
         }
         // Escape closes the open popup; otherwise it takes focus away from
@@ -1242,6 +1252,13 @@ impl Context {
         let payload = self.dnd_payload::<P>()?;
         self.dnd = None;
         Some(payload)
+    }
+
+    /// The id of the widget whose payload is being dragged (the `id` of
+    /// [`Ui::dnd_drag_source`], or the widget given to
+    /// [`Ui::dnd_set_payload`]).
+    pub fn dnd_source_id(&self) -> Option<Id> {
+        self.dnd.as_ref().map(|d| d.source)
     }
 
     /// Whether the widget being pressed handles drags itself.
