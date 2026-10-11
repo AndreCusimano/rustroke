@@ -88,6 +88,19 @@ impl DisplayList {
         other.clip_rect = Rect::EVERYTHING;
     }
 
+    /// Runs `add_shapes` and moves the shapes it added to position
+    /// `index` (a value of [`DisplayList::len`] taken earlier), so they
+    /// are drawn behind everything added since then. Used to paint a
+    /// background once the size of the content in front is known.
+    pub fn insert_at<R>(&mut self, index: usize, add_shapes: impl FnOnce(&mut Self) -> R) -> R {
+        let start = self.shapes.len();
+        let result = add_shapes(self);
+        let added = self.shapes.len() - start;
+        let index = index.min(start);
+        self.shapes[index..].rotate_right(added);
+        result
+    }
+
     /// Runs `add_shapes` with the clip rectangle narrowed to `clip_rect`
     /// (intersected with the current one), then restores it.
     pub fn with_clip<R>(&mut self, clip_rect: Rect, add_shapes: impl FnOnce(&mut Self) -> R) -> R {
@@ -563,6 +576,28 @@ mod tests {
                 Rect::EVERYTHING
             ]
         );
+    }
+
+    #[test]
+    fn insert_at_puts_shapes_behind() {
+        let mut list = DisplayList::new();
+        list.circle_filled(point(0.0, 0.0), 1.0, Color::WHITE);
+        let start = list.len();
+        list.circle_filled(point(0.0, 0.0), 2.0, Color::WHITE);
+        list.circle_filled(point(0.0, 0.0), 3.0, Color::WHITE);
+        list.insert_at(start, |list| {
+            list.circle_filled(point(0.0, 0.0), 4.0, Color::WHITE);
+            list.circle_filled(point(0.0, 0.0), 5.0, Color::WHITE);
+        });
+        let radii: Vec<f32> = list
+            .shapes()
+            .iter()
+            .map(|s| match s.shape {
+                Shape::Circle { radius, .. } => radius,
+                _ => 0.0,
+            })
+            .collect();
+        assert_eq!(radii, [1.0, 4.0, 5.0, 2.0, 3.0]);
     }
 
     #[test]

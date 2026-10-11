@@ -62,6 +62,8 @@ pub struct Panel {
     resizable: bool,
     auto_width: bool,
     margin: Option<f32>,
+    min_size: Option<f32>,
+    max_size: Option<f32>,
 }
 
 impl Panel {
@@ -73,6 +75,8 @@ impl Panel {
             resizable: matches!(side, PanelSide::Left | PanelSide::Right),
             auto_width: false,
             margin: None,
+            min_size: None,
+            max_size: None,
         }
     }
 
@@ -124,22 +128,46 @@ impl Panel {
         self
     }
 
-    /// Shows the panel and its content. Returns what `add_contents` returned.
-    pub fn show<R>(
-        self,
-        root: &mut impl UiRoot,
-        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
-    ) -> InnerResponse<R> {
-        let (ctx, fonts) = root.parts();
-        let style = std::sync::Arc::clone(ctx.style());
-        let pad = self.margin.unwrap_or(style.spacing.window_padding);
-        let available = ctx.available_rect();
-        let vertical_side = matches!(self.side, PanelSide::Left | PanelSide::Right);
-        let default = self
-            .default_size
-            .unwrap_or(if vertical_side { 200.0 } else { 32.0 });
-        let size: f32 = ctx.data_persisted(self.id).unwrap_or(default);
+    /// Smallest width (side panels) or height (top/bottom) in points.
+    /// Without it, a side panel can be dragged down to 60 points.
+    pub fn min_size(mut self, size: f32) -> Self {
+        self.min_size = Some(size);
+        self
+    }
 
+    /// Largest width (side panels) or height (top/bottom; taller content
+    /// is clipped) in points. Without it, a side panel can be dragged up
+    /// to 60 points from the other edge.
+    pub fn max_size(mut self, size: f32) -> Self {
+        self.max_size = Some(size);
+        self
+    }
+
+    fn is_vertical_side(&self) -> bool {
+        matches!(self.side, PanelSide::Left | PanelSide::Right)
+    }
+
+    /// `size` within the panel's limits, for an area `extent` points
+    /// across (wide for side panels, tall for top/bottom).
+    fn clamp_size(&self, size: f32, extent: f32) -> f32 {
+        let (min, max) = if self.is_vertical_side() {
+            let max = if extent.is_finite() {
+                (extent - 60.0).max(60.0)
+            } else {
+                f32::INFINITY
+            };
+            (self.min_size.unwrap_or(60.0), self.max_size.unwrap_or(max))
+        } else {
+            (
+                self.min_size.unwrap_or(0.0),
+                self.max_size.unwrap_or(f32::INFINITY),
+            )
+        };
+        size.min(max).max(min)
+    }
+
+    /// The panel's area at the `side` of `available` and what is left.
+    fn split(&self, available: Rect, size: f32) -> (Rect, Rect) {
         let rect = match self.side {
             PanelSide::Top => Rect::from_min_size(available.min, vec2(available.width(), size)),
             PanelSide::Bottom => Rect::from_min_max(
@@ -164,79 +192,34 @@ impl Panel {
                 Rect::from_min_max(available.min, point(rect.min.x, available.max.y))
             }
         };
+        (rect, remaining)
+    }
 
+    /// The size from last frame (or the default), within the limits set
+    /// with [`Panel::min_size`] and [`Panel::max_size`].
+    fn current_size(&self, ctx: &mut Context) -> f32 {
+        let default =
+            self.default_size
+                .unwrap_or(if self.is_vertical_side() { 200.0 } else { 32.0 });
+        let size: f32 = ctx.data_persisted(self.id).unwrap_or(default);
+        size.min(self.max_size.unwrap_or(f32::INFINITY))
+            .max(self.min_size.unwrap_or(0.0))
+    }
+
+    /// Shows the panel and its content. Returns what `add_contents` returned.
+    pub fn show<R>(
+        self,
+        root: &mut impl UiRoot,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        let (ctx, fonts) = root.parts();
+        let available = ctx.available_rect();
+        let size = self.current_size(ctx);
+        let (rect, remaining) = self.split(available, size);
         let layer = LayerId::background();
         let (inner, response, new_size) = ctx.ui_in_layer(layer, self.id, rect, fonts, |ui| {
-            let unclipped = ui.clip_rect();
-            ui.set_clip_rect(rect);
-            let visuals = &style.visuals;
-            ui.painter().rect_filled(rect, 0.0, visuals.panel_fill);
-            let (a, b) = match self.side {
-                PanelSide::Top => (rect.left_bottom(), rect.right_bottom()),
-                PanelSide::Bottom => (rect.left_top(), rect.right_top()),
-                PanelSide::Left => (rect.right_top(), rect.right_bottom()),
-                PanelSide::Right => (rect.left_top(), rect.left_bottom()),
-            };
-            ui.painter().line(a, b, visuals.window_stroke);
-
-            // The resize grip straddles the edge, so it isn't clipped to the
-            // panel. It is registered before the content so that widgets
-            // under it win (hit testing prefers what was added last).
-            let grip_response = (self.resizable && vertical_side).then(|| {
-                let x = if self.side == PanelSide::Left {
-                    rect.max.x
-                } else {
-                    rect.min.x
-                };
-                let grip =
-                    Rect::from_min_max(point(x - 3.0, rect.min.y), point(x + 3.0, rect.max.y));
-                ui.clip_rect_restore(unclipped);
-                let r = ui.interact(self.id.with("resize"), grip, Sense::POINTER_DRAG);
-                ui.set_clip_rect(rect);
-                r
-            });
-
-            let auto_width = self.auto_width && vertical_side;
-            let mut content_rect = rect.expand(-pad);
-            if auto_width {
-                // Measure the content at its natural width.
-                content_rect.max.x = f32::INFINITY;
-            }
-            let content = ui.scope_with(content_rect, Layout::top_down(Align::Min), add_contents);
-            let used = content.response.rect;
-            let mut new_size = if auto_width {
-                let width = if used.is_empty() {
-                    0.0
-                } else {
-                    used.max.x - content_rect.min.x
-                };
-                (width + 2.0 * pad).min(available.width()).round()
-            } else if vertical_side {
-                size
-            } else {
-                used.height() + 2.0 * pad
-            };
-
-            ui.clip_rect_restore(unclipped);
-            if let Some(r) = grip_response {
-                if r.hovered() || r.dragged() {
-                    ui.ctx().set_cursor(CursorIcon::ResizeHorizontal);
-                    let color = visuals.accent;
-                    ui.painter().line(a, b, Stroke::new(2.0, color));
-                }
-                if r.dragged() {
-                    let dx = r.drag_delta().x;
-                    new_size += if self.side == PanelSide::Left {
-                        dx
-                    } else {
-                        -dx
-                    };
-                }
-                new_size = new_size.clamp(60.0, (available.width() - 60.0).max(60.0));
-            }
-            (content.inner, content.response, new_size)
+            self.show_body(ui, rect, available, size, add_contents)
         });
-
         if new_size != size {
             ctx.insert_persisted(self.id, new_size);
             ctx.request_repaint();
@@ -245,6 +228,147 @@ impl Panel {
         let mut response = response;
         response.rect = rect;
         InnerResponse { inner, response }
+    }
+
+    /// Shows the panel at an edge of the space left in `ui` (instead of
+    /// the window's), e.g. a sidebar inside a view; widgets added to `ui`
+    /// afterwards go in the rest (often a [`CentralPanel::show_inside`]).
+    ///
+    /// ```ignore
+    /// Panel::left("tools").default_size(200.0).min_size(150.0).max_size(320.0)
+    ///     .show_inside(ui, |ui| { /* sidebar */ });
+    /// CentralPanel::default().show_inside(ui, |ui| { /* content */ });
+    /// ```
+    ///
+    /// Inside a vertically scrolling area a side panel is as tall as its
+    /// content.
+    pub fn show_inside<R>(
+        self,
+        ui: &mut Ui<'_>,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        let mut available = ui.available_rect();
+        let content_height_key = self.id.with("content height");
+        if self.is_vertical_side() && !available.height().is_finite() {
+            let height: f32 = ui.ctx().data(content_height_key).unwrap_or(0.0);
+            available.max.y = available.min.y + height;
+        }
+        let size = self.current_size(ui.ctx());
+        let (rect, remaining) = self.split(available, size);
+        let (inner, response, new_size) = ui.panel_child(self.id, rect, |child| {
+            self.show_body(child, rect, available, size, add_contents)
+        });
+        if self.is_vertical_side() {
+            let pad = self.margin.unwrap_or(ui.style().spacing.window_padding);
+            let content_height = response.rect.height().max(0.0) + 2.0 * pad;
+            let old: Option<f32> = ui.ctx().data(content_height_key);
+            if old != Some(content_height) {
+                ui.ctx().insert_data(content_height_key, content_height);
+                if !ui.available_rect().height().is_finite() {
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+        if new_size != size {
+            ui.ctx().insert_persisted(self.id, new_size);
+            ui.ctx().request_repaint();
+        }
+        ui.shrink_to(remaining, rect);
+        let mut response = response;
+        response.rect = rect;
+        InnerResponse { inner, response }
+    }
+
+    /// Paints the panel in `ui` (which covers `rect`) and adds the
+    /// content; returns its result, response and the new size.
+    fn show_body<R>(
+        &self,
+        ui: &mut Ui<'_>,
+        rect: Rect,
+        available: Rect,
+        size: f32,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> (R, Response, f32) {
+        let style = ui.style();
+        let pad = self.margin.unwrap_or(style.spacing.window_padding);
+        let vertical_side = self.is_vertical_side();
+        let unclipped = ui.clip_rect();
+        ui.set_clip_rect(rect);
+        let visuals = &style.visuals;
+        ui.painter().rect_filled(rect, 0.0, visuals.panel_fill);
+        let (a, b) = match self.side {
+            PanelSide::Top => (rect.left_bottom(), rect.right_bottom()),
+            PanelSide::Bottom => (rect.left_top(), rect.right_top()),
+            PanelSide::Left => (rect.right_top(), rect.right_bottom()),
+            PanelSide::Right => (rect.left_top(), rect.left_bottom()),
+        };
+        ui.painter().line(a, b, visuals.window_stroke);
+
+        // The resize grip straddles the edge, so it isn't clipped to the
+        // panel. It is registered before the content so that widgets
+        // under it win (hit testing prefers what was added last).
+        let grip_response = (self.resizable && vertical_side).then(|| {
+            let x = if self.side == PanelSide::Left {
+                rect.max.x
+            } else {
+                rect.min.x
+            };
+            let grip = Rect::from_min_max(point(x - 3.0, rect.min.y), point(x + 3.0, rect.max.y));
+            ui.clip_rect_restore(unclipped);
+            let r = ui.interact(self.id.with("resize"), grip, Sense::POINTER_DRAG);
+            ui.set_clip_rect(rect);
+            r
+        });
+
+        let auto_width = self.auto_width && vertical_side;
+        let mut content_rect = rect.expand(-pad);
+        if auto_width {
+            // Measure the content at its natural width.
+            content_rect.max.x = f32::INFINITY;
+        }
+        let content = ui.scope_with(content_rect, Layout::top_down(Align::Min), add_contents);
+        let used = content.response.rect;
+        let mut new_size = if auto_width {
+            let width = if used.is_empty() {
+                0.0
+            } else {
+                used.max.x - content_rect.min.x
+            };
+            let width = (width + 2.0 * pad).min(available.width()).round();
+            if self.min_size.is_some() || self.max_size.is_some() {
+                self.clamp_size(width, available.width())
+            } else {
+                width
+            }
+        } else if vertical_side {
+            size
+        } else {
+            let height = used.height() + 2.0 * pad;
+            if self.min_size.is_some() || self.max_size.is_some() {
+                self.clamp_size(height, available.height())
+            } else {
+                height
+            }
+        };
+
+        ui.clip_rect_restore(unclipped);
+        if let Some(r) = grip_response {
+            if r.hovered() || r.dragged() {
+                ui.ctx().set_cursor(CursorIcon::ResizeHorizontal);
+                let color = visuals.accent;
+                ui.painter().line(a, b, Stroke::new(2.0, color));
+            }
+            if r.dragged() {
+                let dx = r.drag_delta().x;
+                new_size += if self.side == PanelSide::Left {
+                    dx
+                } else {
+                    -dx
+                };
+            }
+            new_size = self.clamp_size(new_size, available.width());
+        }
+        (content.inner, content.response, new_size)
     }
 }
 
@@ -278,6 +402,28 @@ impl CentralPanel {
             add_contents(ui)
         })
     }
+
+    /// Shows the content in all the space left in `ui`, e.g. after
+    /// [`Panel::show_inside`]. Nothing can be added to `ui` after it.
+    pub fn show_inside<R>(self, ui: &mut Ui<'_>, add_contents: impl FnOnce(&mut Ui<'_>) -> R) -> R {
+        let rect = ui.available_rect();
+        let margin = self.margin.unwrap_or(ui.style().spacing.window_margin);
+        let id = ui.next_auto_id();
+        let (inner, used) = ui.panel_child(id, rect.expand(-margin), |child| {
+            child.set_clip_rect(rect);
+            let inner = add_contents(child);
+            (inner, child.min_rect())
+        });
+        let mut covered = rect;
+        if !rect.width().is_finite() {
+            covered.max.x = used.max.x + margin;
+        }
+        if !rect.height().is_finite() {
+            covered.max.y = used.max.y + margin;
+        }
+        ui.shrink_to(Rect::from_min_size(covered.max, Vec2::ZERO), covered);
+        inner
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +455,7 @@ pub struct Window<'open> {
     default_width: f32,
     default_height: Option<f32>,
     resizable: bool,
+    frame: Option<crate::Container>,
 }
 
 impl<'open> Window<'open> {
@@ -324,7 +471,17 @@ impl<'open> Window<'open> {
             default_width: 280.0,
             default_height: None,
             resizable: true,
+            frame: None,
         }
+    }
+
+    /// Background, border, corner radius, shadow and padding of the
+    /// window instead of the theme's ([`crate::Container::window`]). Its
+    /// inner margin is the space around the content; the outer margin
+    /// and size limits are ignored.
+    pub fn frame(mut self, frame: crate::Container) -> Self {
+        self.frame = Some(frame);
+        self
     }
 
     /// Identifies the window by `salt` instead of its title.
@@ -378,6 +535,10 @@ impl<'open> Window<'open> {
         let style = std::sync::Arc::clone(ctx.style());
         let visuals = &style.visuals;
         let pad = style.spacing.window_padding;
+        let frame = self
+            .frame
+            .unwrap_or_else(|| crate::Container::window(&style));
+        let margin = frame.get_inner_margin();
         let title_height = style.spacing.interact_height + 4.0;
         let screen = ctx.input().screen_rect;
 
@@ -397,12 +558,11 @@ impl<'open> Window<'open> {
             .x
             .clamp(screen.min.x - state.width + 60.0, screen.max.x - 60.0);
         state.pos.y = state.pos.y.clamp(screen.min.y, screen.max.y - title_height);
-        let min_height = title_height + 2.0 * pad + 20.0;
-        let height = state
-            .height
-            .map_or(title_height + state.content_size.y + 2.0 * pad, |h| {
-                h.max(min_height)
-            });
+        let min_height = title_height + margin.top + margin.bottom + 20.0;
+        let height = state.height.map_or(
+            title_height + state.content_size.y + margin.top + margin.bottom,
+            |h| h.max(min_height),
+        );
         let rect = Rect::from_min_size(state.pos, vec2(state.width, height));
 
         let layer = LayerId::new(Order::Middle, self.id);
@@ -410,7 +570,7 @@ impl<'open> Window<'open> {
         let (inner, content_rect) = ctx.ui_in_layer(layer, self.id, rect, fonts, |ui| {
             // The background blocks clicks to what is below the window.
             let _ = ui.interact(self.id.with("background"), rect, Sense::POINTER_DRAG);
-            paint_floating_frame(ui.painter(), rect, visuals);
+            frame.paint(ui.painter(), rect);
 
             // Title bar: drag to move.
             let title_rect = Rect::from_min_size(rect.min, vec2(rect.width(), title_height));
@@ -464,12 +624,12 @@ impl<'open> Window<'open> {
             // With a fixed height the content gets exactly the space left,
             // so scroll areas fill it.
             let bottom = match state.height {
-                Some(_) => rect.max.y - pad,
+                Some(_) => rect.max.y - margin.bottom,
                 None => screen.max.y.max(rect.max.y),
             };
             let content_max = Rect::from_min_max(
-                point(rect.min.x + pad, title_rect.max.y + pad),
-                point(rect.max.x - pad, bottom),
+                point(rect.min.x + margin.left, title_rect.max.y + margin.top),
+                point(rect.max.x - margin.right, bottom),
             );
             let content = ui.scope_with(content_max, Layout::top_down(Align::Min), add_contents);
 

@@ -18,6 +18,7 @@ mod accessibility;
 mod automation;
 mod collapsing;
 mod combo_box;
+mod container;
 mod containers;
 mod context;
 mod dnd;
@@ -51,6 +52,7 @@ pub use accessibility::{NumericInfo, WidgetDescription, WidgetInfo, WidgetRole};
 pub use automation::Automation;
 pub use collapsing::{CollapsingHeader, CollapsingResponse};
 pub use combo_box::ComboBox;
+pub use container::{Container, Margin};
 pub use containers::{CentralPanel, Panel, PanelSide, ScrollArea, UiRoot, Window};
 pub use context::{
     Context, CursorIcon, FrameOutput, LayerId, Order, Persist, RepaintHandle, Sense, TextureHandle,

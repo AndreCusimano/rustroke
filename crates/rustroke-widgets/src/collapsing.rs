@@ -40,6 +40,7 @@ pub struct CollapsingHeader {
     selected: Option<bool>,
     icon: Option<rustroke_text::IconId>,
     text_style: Option<rustroke_text::TextStyle>,
+    text_color: Option<rustroke_core::Color>,
 }
 
 impl CollapsingHeader {
@@ -54,6 +55,7 @@ impl CollapsingHeader {
             selected: None,
             icon: None,
             text_style: None,
+            text_color: None,
         }
     }
 
@@ -88,6 +90,18 @@ impl CollapsingHeader {
     /// The header's text style (default: the body style).
     pub fn text_style(mut self, style: rustroke_text::TextStyle) -> Self {
         self.text_style = Some(style);
+        self
+    }
+
+    /// The header's text style, like [`CollapsingHeader::text_style`]
+    /// (named like the other widgets' setter).
+    pub fn font(self, font: rustroke_text::TextStyle) -> Self {
+        self.text_style(font)
+    }
+
+    /// The header's text (and triangle) color instead of the theme's.
+    pub fn text_color(mut self, color: rustroke_core::Color) -> Self {
+        self.text_color = Some(color);
         self
     }
 
@@ -165,6 +179,7 @@ impl CollapsingHeader {
 
         let openness = ui.ctx().animate_bool(id.with("openness"), open);
         let visuals = ui.widget_visuals(&header);
+        let fg = self.text_color.unwrap_or(visuals.fg);
         let radius = style.visuals.small_corner_radius;
         let highlight = header.rect;
         if self.selected == Some(true) {
@@ -173,17 +188,17 @@ impl CollapsingHeader {
         } else if header.hovered() || header.is_pressed() {
             ui.painter().rect_filled(highlight, radius, visuals.bg_fill);
         }
-        paint_triangle(ui, toggle_rect.center(), icon * 0.3, openness, visuals.fg);
+        paint_triangle(ui, toggle_rect.center(), icon * 0.3, openness, fg);
         let mut text_x = toggle_rect.max.x + 4.0;
         if let Some(header_icon) = &header_icon {
             let pos = point(text_x, rect.center().y - header_icon.size.y / 2.0);
-            ui.paint_icon(pos, header_icon, visuals.fg);
+            ui.paint_icon(pos, header_icon, fg);
             text_x += icon_width;
         }
         ui.painter().galley(
             point(text_x, rect.center().y - galley.size.y / 2.0),
             galley,
-            visuals.fg,
+            fg,
         );
         if header.focus_visible() {
             ui.painter().rect_stroke(

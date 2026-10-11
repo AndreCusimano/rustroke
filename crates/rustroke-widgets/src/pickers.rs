@@ -308,6 +308,18 @@ const MONTHS: [&str; 12] = [
     "December",
 ];
 
+/// 1970-01-01, so structs holding a date can derive `Default` (use
+/// [`Date::today_utc`] for the current day).
+impl Default for Date {
+    fn default() -> Self {
+        Self {
+            year: 1970,
+            month: 1,
+            day: 1,
+        }
+    }
+}
+
 impl Date {
     /// The date, if it exists.
     pub fn new(year: i32, month: u32, day: u32) -> Option<Self> {

@@ -102,6 +102,43 @@ macro_rules! frame_setters {
 }
 pub(crate) use frame_setters;
 
+/// Per-widget text color and style (`.text_color(..)`, `.font(..)`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct TextOverride {
+    pub color: Option<Color>,
+    pub font: Option<TextStyle>,
+}
+
+impl TextOverride {
+    /// The custom text style, or the style's `body`.
+    pub fn font(&self, style: &crate::Style) -> TextStyle {
+        self.font.clone().unwrap_or_else(|| style.body.clone())
+    }
+
+    /// The custom text color, or `themed`.
+    pub fn color(&self, themed: Color) -> Color {
+        self.color.unwrap_or(themed)
+    }
+}
+
+/// Adds `text_color` and `font` to a builder with a `text_style` field.
+macro_rules! text_setters {
+    () => {
+        /// Text color instead of the theme's (which follows hover and
+        /// press).
+        pub fn text_color(mut self, color: Color) -> Self {
+            self.text_style.color = Some(color);
+            self
+        }
+
+        /// Text style (font, size, weight) instead of the style's `body`.
+        pub fn font(mut self, font: TextStyle) -> Self {
+            self.text_style.font = Some(font);
+            self
+        }
+    };
+}
+
 /// Space between a menu item's text and its shortcut.
 const SHORTCUT_GAP: f32 = 24.0;
 
@@ -252,6 +289,7 @@ impl Widget for Label {
 pub struct Hyperlink {
     text: String,
     url: Option<String>,
+    text_style: TextOverride,
 }
 
 impl Hyperlink {
@@ -261,6 +299,7 @@ impl Hyperlink {
         Self {
             text: url.clone(),
             url: Some(url),
+            text_style: TextOverride::default(),
         }
     }
 
@@ -269,6 +308,7 @@ impl Hyperlink {
         Self {
             text: text.into(),
             url: Some(url.into()),
+            text_style: TextOverride::default(),
         }
     }
 
@@ -278,14 +318,18 @@ impl Hyperlink {
         Self {
             text: text.into(),
             url: None,
+            text_style: TextOverride::default(),
         }
     }
+
+    text_setters!();
 }
 
 impl Widget for Hyperlink {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
-        let galley = ui.layout_text(&self.text, &style.body, None);
+        let font = self.text_style.font(&style);
+        let galley = ui.layout_text(&self.text, &font, None);
         let response = ui.allocate_response(galley.size, Sense::CLICK);
         let mut info = WidgetInfo::new(WidgetRole::Link, self.text.clone());
         if let Some(url) = &self.url {
@@ -295,10 +339,11 @@ impl Widget for Hyperlink {
         if response.hovered() {
             ui.ctx().set_cursor(CursorIcon::PointingHand);
         }
+        let link = self.text_style.color(style.visuals.accent);
         let color = if response.is_pressed() {
-            style.visuals.accent.lerp(style.visuals.text, 0.3)
+            link.lerp(style.visuals.text, 0.3)
         } else {
-            style.visuals.accent
+            link
         };
         let rect = response.rect;
         ui.painter().galley(rect.min, galley, color);
@@ -331,6 +376,7 @@ pub struct Button {
     accessible_label: Option<String>,
     shortcut_text: String,
     pub(crate) frame_style: FrameOverride,
+    text_style: TextOverride,
     /// A menu item opening a submenu: clicking it keeps the menu open.
     pub(crate) opens_submenu: bool,
 }
@@ -347,11 +393,13 @@ impl Button {
             accessible_label: None,
             shortcut_text: String::new(),
             frame_style: FrameOverride::default(),
+            text_style: TextOverride::default(),
             opens_submenu: false,
         }
     }
 
     frame_setters!();
+    text_setters!();
 
     /// A button showing only an icon (toolbars). Give it a name for screen
     /// readers and tests with [`Button::accessible_label`], and usually a
@@ -418,9 +466,10 @@ impl Widget for Button {
             // Square-ish icon buttons.
             padding.x = padding.y.max(6.0);
         }
-        let galley = ui.layout_text(&self.text, &style.body, None);
+        let font = self.text_style.font(&style);
+        let galley = ui.layout_text(&self.text, &font, None);
         let shortcut = (!self.shortcut_text.is_empty())
-            .then(|| ui.layout_text(&self.shortcut_text, &style.body, None));
+            .then(|| ui.layout_text(&self.shortcut_text, &font, None));
         let shortcut_width = shortcut.as_ref().map_or(0.0, |g| g.size.x + SHORTCUT_GAP);
         let icon_width = icon.as_ref().map_or(0.0, |i| {
             i.size.x + if has_text { ICON_TEXT_GAP } else { 0.0 }
@@ -462,6 +511,7 @@ impl Widget for Button {
         }
 
         let visuals = ui.widget_visuals(&response);
+        let fg = self.text_style.color(visuals.fg);
         let custom = self.frame_style;
         let radius = custom.corner_radius(style.visuals.corner_radius);
         let fill = custom.fill(&response, visuals.bg_fill, style.visuals.text);
@@ -481,16 +531,16 @@ impl Widget for Button {
         };
         if let Some(icon) = &icon {
             let pos = point(left, rect.center().y - icon.size.y / 2.0);
-            ui.paint_icon(pos, icon, visuals.fg);
+            ui.paint_icon(pos, icon, fg);
         }
         if has_text {
             let pos = point(left + icon_width, rect.center().y - galley.size.y / 2.0);
-            ui.painter().galley(pos, galley, visuals.fg);
+            ui.painter().galley(pos, galley, fg);
         }
         if let Some(shortcut) = shortcut {
             // Right-aligned, so shortcuts form a column in menus.
             let x = rect.max.x - padding.x - shortcut.size.x;
-            let color = style.visuals.weak_text.lerp(visuals.fg, 0.25);
+            let color = style.visuals.weak_text.lerp(fg, 0.25);
             ui.painter()
                 .galley(text_pos(rect, x, &shortcut), shortcut, color);
         }
@@ -571,6 +621,7 @@ pub struct Checkbox<'a> {
     checked: &'a mut bool,
     text: String,
     accessible_label: Option<String>,
+    text_style: TextOverride,
 }
 
 impl<'a> Checkbox<'a> {
@@ -580,8 +631,11 @@ impl<'a> Checkbox<'a> {
             checked,
             text: text.into(),
             accessible_label: None,
+            text_style: TextOverride::default(),
         }
     }
+
+    text_setters!();
 
     /// The name screen readers announce (and tests find the widget by),
     /// instead of the visible text. Useful when the text is empty.
@@ -595,7 +649,8 @@ impl Widget for Checkbox<'_> {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
         let icon = style.spacing.icon_size;
-        let galley = ui.layout_text(&self.text, &style.body, None);
+        let font = self.text_style.font(&style);
+        let galley = ui.layout_text(&self.text, &font, None);
         let size = vec2(
             icon + style.spacing.icon_spacing + galley.size.x,
             galley.size.y.max(style.spacing.interact_height),
@@ -646,8 +701,11 @@ impl Widget for Checkbox<'_> {
             );
         }
         let text_x = box_rect.max.x + style.spacing.icon_spacing;
-        ui.painter()
-            .galley(text_pos(rect, text_x, &galley), galley, visuals.fg);
+        ui.painter().galley(
+            text_pos(rect, text_x, &galley),
+            galley,
+            self.text_style.color(visuals.fg),
+        );
         paint_focus_ring(ui, &response, box_rect, radius);
         response
     }
@@ -660,6 +718,7 @@ pub struct RadioButton {
     selected: bool,
     text: String,
     accessible_label: Option<String>,
+    text_style: TextOverride,
 }
 
 impl RadioButton {
@@ -669,8 +728,11 @@ impl RadioButton {
             selected,
             text: text.into(),
             accessible_label: None,
+            text_style: TextOverride::default(),
         }
     }
+
+    text_setters!();
 
     /// The name screen readers announce (and tests find the widget by),
     /// instead of the visible text. Useful when the text is empty.
@@ -684,7 +746,8 @@ impl Widget for RadioButton {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
         let icon = style.spacing.icon_size;
-        let galley = ui.layout_text(&self.text, &style.body, None);
+        let font = self.text_style.font(&style);
+        let galley = ui.layout_text(&self.text, &font, None);
         let size = vec2(
             icon + style.spacing.icon_spacing + galley.size.x,
             galley.size.y.max(style.spacing.interact_height),
@@ -730,8 +793,11 @@ impl Widget for RadioButton {
                 .circle_filled(center, icon / 5.0 * selected, style.visuals.on_accent);
         }
         let text_x = rect.min.x + icon + style.spacing.icon_spacing;
-        ui.painter()
-            .galley(text_pos(rect, text_x, &galley), galley, visuals.fg);
+        ui.painter().galley(
+            text_pos(rect, text_x, &galley),
+            galley,
+            self.text_style.color(visuals.fg),
+        );
         let indicator = Rect::from_center_size(center, Vec2::splat(icon));
         paint_focus_ring(ui, &response, indicator, icon / 2.0);
         response
@@ -747,6 +813,7 @@ pub struct SelectableLabel {
     selected: bool,
     text: String,
     accessible_label: Option<String>,
+    text_style: TextOverride,
 }
 
 impl SelectableLabel {
@@ -756,8 +823,11 @@ impl SelectableLabel {
             selected,
             text: text.into(),
             accessible_label: None,
+            text_style: TextOverride::default(),
         }
     }
+
+    text_setters!();
 
     /// The name screen readers announce (and tests find the widget by),
     /// instead of the visible text.
@@ -771,7 +841,8 @@ impl Widget for SelectableLabel {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
         let padding = vec2(style.spacing.button_padding.x / 2.0, 2.0);
-        let galley = ui.layout_text(&self.text, &style.body, None);
+        let font = self.text_style.font(&style);
+        let galley = ui.layout_text(&self.text, &font, None);
         let mut size = galley.size + padding * 2.0;
         let menu_width = ui.in_menu();
         if let Some(width) = menu_width {
@@ -807,11 +878,11 @@ impl Widget for SelectableLabel {
         } else if response.hovered() || response.is_pressed() {
             ui.painter().rect_filled(rect, radius, visuals.bg_fill);
         }
-        let fg = if self.selected {
+        let fg = self.text_style.color(if self.selected {
             style.visuals.text
         } else {
             visuals.fg
-        };
+        });
         ui.painter()
             .galley(text_pos(rect, rect.min.x + padding.x, &galley), galley, fg);
         paint_focus_ring(ui, &response, rect, radius);
@@ -827,6 +898,7 @@ pub struct ProgressBar {
     show_percentage: bool,
     desired_width: Option<f32>,
     animate: bool,
+    fill: Option<Color>,
 }
 
 impl ProgressBar {
@@ -838,7 +910,14 @@ impl ProgressBar {
             show_percentage: false,
             desired_width: None,
             animate: false,
+            fill: None,
         }
+    }
+
+    /// Color of the filled part instead of the accent color.
+    pub fn fill(mut self, color: Color) -> Self {
+        self.fill = Some(color);
+        self
     }
 
     /// Text drawn on the bar (e.g. "Loading mesh…").
@@ -905,7 +984,8 @@ impl Widget for ProgressBar {
         };
         if fill_width > 0.0 {
             let fill = Rect::from_min_size(rect.min, vec2(fill_width, height));
-            ui.painter().rect_filled(fill, radius, visuals.accent);
+            let color = self.fill.unwrap_or(visuals.accent);
+            ui.painter().rect_filled(fill, radius, color);
         }
         if self.animate {
             // A soft highlight sweeping across the bar.
@@ -1040,6 +1120,7 @@ pub struct Slider<'a, T: Numeric> {
     step: Option<f64>,
     show_value: bool,
     accessible_label: Option<String>,
+    color: Option<Color>,
 }
 
 impl<'a, T: Numeric> Slider<'a, T> {
@@ -1052,7 +1133,14 @@ impl<'a, T: Numeric> Slider<'a, T> {
             step: None,
             show_value: true,
             accessible_label: None,
+            color: None,
         }
+    }
+
+    /// Color of the filled part of the track instead of the accent color.
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
     }
 
     /// The name screen readers announce (and tests find the widget by),
@@ -1232,7 +1320,8 @@ impl<T: Numeric> Widget for Slider<'_, T> {
             .rect_filled(track, 2.0, style.visuals.inactive.bg_fill);
         let handle_x = x_of(value);
         let filled = Rect::from_min_max(track.min, point(handle_x, track.max.y));
-        ui.painter().rect_filled(filled, 2.0, style.visuals.accent);
+        let color = self.color.unwrap_or(style.visuals.accent);
+        ui.painter().rect_filled(filled, 2.0, color);
         let radius = if response.hovered() || response.is_pressed() {
             handle_radius + 1.0
         } else {
@@ -1458,31 +1547,76 @@ impl Widget for AnimatedImage<'_> {
     }
 }
 
-/// A thin line: horizontal across a top-down Ui, vertical inside a row.
+/// A thin line: horizontal across a top-down Ui, vertical inside a row
+/// (or as chosen with [`Separator::horizontal`] / [`Separator::vertical`]).
+///
+/// ```ignore
+/// ui.add(Separator::new().spacing(12.0).stroke(Stroke::new(2.0, color)));
+/// ```
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Separator;
+pub struct Separator {
+    spacing: Option<f32>,
+    stroke: Option<Stroke>,
+    vertical: Option<bool>,
+}
+
+impl Separator {
+    /// A line with the theme's color, oriented by the layout.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Space the separator takes across the line, in points, with the
+    /// line in the middle (default: the line's width). The Ui's item
+    /// spacing is added on both sides as for any widget.
+    pub fn spacing(mut self, spacing: f32) -> Self {
+        self.spacing = Some(spacing);
+        self
+    }
+
+    /// Width and color of the line instead of the theme's.
+    pub fn stroke(mut self, stroke: impl Into<Stroke>) -> Self {
+        self.stroke = Some(stroke.into());
+        self
+    }
+
+    /// A horizontal line, whatever the layout.
+    pub fn horizontal(mut self) -> Self {
+        self.vertical = Some(false);
+        self
+    }
+
+    /// A vertical line, whatever the layout.
+    pub fn vertical(mut self) -> Self {
+        self.vertical = Some(true);
+        self
+    }
+}
 
 impl Widget for Separator {
     fn ui(self, ui: &mut Ui<'_>) -> Response {
         let style = ui.style();
-        let in_row = ui.layout().is_horizontal();
-        // In a menu, span the menu (its width is measured from the items,
-        // so the separator must not widen it).
-        let width = ui.in_menu().unwrap_or_else(|| ui.fill_width(0.0));
-        let size = if in_row {
-            vec2(1.0, style.spacing.interact_height)
+        let vertical = self.vertical.unwrap_or_else(|| ui.layout().is_horizontal());
+        let stroke = self
+            .stroke
+            .unwrap_or_else(|| Stroke::new(1.0, style.visuals.inactive.stroke.color));
+        let thickness = self.spacing.unwrap_or(stroke.width).max(stroke.width);
+        let size = if vertical {
+            vec2(thickness, style.spacing.interact_height)
         } else {
-            vec2(width, 1.0)
+            // In a menu, span the menu (its width is measured from the
+            // items, so the separator must not widen it).
+            let width = ui.in_menu().unwrap_or_else(|| ui.fill_width(0.0));
+            vec2(width, thickness)
         };
         let response = ui.allocate_response(size, Sense::HOVER);
         let r = response.rect;
-        let (a, b) = if in_row {
+        let (a, b) = if vertical {
             (point(r.center().x, r.min.y), point(r.center().x, r.max.y))
         } else {
             (point(r.min.x, r.center().y), point(r.max.x, r.center().y))
         };
-        let color = style.visuals.inactive.stroke.color;
-        ui.painter().line(a, b, Stroke::new(1.0, color));
+        ui.painter().line(a, b, stroke);
         response
     }
 }

@@ -15,6 +15,13 @@ pub struct Color {
     pub a: f32,
 }
 
+/// [`Color::TRANSPARENT`], so structs holding a color can derive `Default`.
+impl Default for Color {
+    fn default() -> Self {
+        Self::TRANSPARENT
+    }
+}
+
 impl Color {
     /// Fully transparent.
     pub const TRANSPARENT: Self = Self::new(0.0, 0.0, 0.0, 0.0);

@@ -82,8 +82,10 @@
 //!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables; [`Flex`]
 //!   (flexbox: wrapping, growing, justified items) and [`FlexGrid`]
 //!   (CSS-style grid with fractional columns and spans).
-//! - **Containers**: [`Panel`] (top/bottom/left/right bars), the central
-//!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
+//! - **Containers**: [`Panel`] (top/bottom/left/right bars, also inside a
+//!   Ui with [`Panel::show_inside`]), the central
+//!   area ([`Frame::ui`] or [`CentralPanel`]), [`Container`] (background,
+//!   border, margins and size limits for a group of widgets), floating [`Window`]s,
 //!   modal dialogs ([`Modal`]), [`ScrollArea`] (vertical, horizontal or
 //!   both; [`ScrollArea::show_rows`] lays out only the visible rows,
 //!   [`Ui::scroll_to_rect`] brings something into view), popup menus with submenus ([`Ui::menu_button`], with an icon
@@ -208,14 +210,14 @@ pub use rustroke_text::{
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
     Align, AnimatedImage, AnimatedTexture, Automation, Button, CentralPanel, Checkbox,
-    CollapsingHeader, CollapsingResponse, ColorPicker, Column, ComboBox, Context, CursorIcon, Date,
-    DatePicker, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
-    FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout,
-    LineHighlight, List, ListResponse, Modal, ModalResponse, Numeric, Order, Panel, PanelSide,
-    ProgressBar, PropertyGrid, PropertyGridUi, RadioButton, ReferenceField, RepaintHandle,
-    Response, ScrollArea, SearchField, SelectableLabel, Sense, Separator, Slider, SortOrder,
-    Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, Table, TableResponse, TextEdit,
-    TextureHandle, TimePicker, Toast, ToastLevel, ToolButton, ToolButtonResponse, Tree,
+    CollapsingHeader, CollapsingResponse, ColorPicker, Column, ComboBox, Container, Context,
+    CursorIcon, Date, DatePicker, Direction, DockArea, DockNode, DockState, DockViewer, DragValue,
+    FocusLost, FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId,
+    Layout, LineHighlight, List, ListResponse, Margin, Modal, ModalResponse, Numeric, Order, Panel,
+    PanelSide, ProgressBar, PropertyGrid, PropertyGridUi, RadioButton, ReferenceField,
+    RepaintHandle, Response, ScrollArea, SearchField, SelectableLabel, Sense, Separator, Slider,
+    SortOrder, Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, Table, TableResponse,
+    TextEdit, TextureHandle, TimePicker, Toast, ToastLevel, ToolButton, ToolButtonResponse, Tree,
     TreeResponse, Ui, UiRoot, Visuals, Widget, WidgetDescription, WidgetInfo, WidgetRole, Window,
     show_inspector, show_toasts,
 };

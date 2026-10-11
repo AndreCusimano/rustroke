@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-11
+
+### Added
+
+- `Container`: a group of widgets drawn over a background, with border,
+  rounded corners, shadow, inner and outer margins (`Margin`), minimum
+  and maximum size, and filling the available width or height. Presets
+  `Container::window`, `group` and `panel`. `Window::frame(Container)`
+  changes a window's background.
+- `DisplayList::insert_at` adds shapes behind ones added earlier.
+- `Panel::show_inside(ui, ..)` and `CentralPanel::show_inside(ui, ..)`:
+  panels inside any `Ui` (a sidebar inside a view). `Panel::min_size` /
+  `max_size` limit the width a side panel can be dragged to (or the
+  height of a top/bottom panel).
+- `FlexItem::min_size` / `max_size`; `Flex::fill_height` (a row as tall
+  as the available space, so items can be centered or stretched) and
+  `Flex::fill_width`. Items with `FlexAlign::Stretch` now really stretch.
+- `text_color(..)` and `font(..)` on `Button`, `Checkbox`,
+  `RadioButton`, `SelectableLabel`, `Hyperlink` and `CollapsingHeader`;
+  `Slider::color` and `ProgressBar::fill` for the filled part.
+- `Separator::new()` with `spacing`, `stroke`, `horizontal` and
+  `vertical`.
+- `GridUi::ui()`, like `FlexUi::ui()`.
+- `Default` for `Color` (transparent) and `Date` (1970-01-01).
+
+### Changed
+
+- `Separator` has options now: write `Separator::new()` (or
+  `Separator::default()`) instead of `Separator`.
+
 ## [0.18.0] — 2026-10-10
 
 ### Added
@@ -628,7 +658,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/AndreCusimano/rustroke/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/AndreCusimano/rustroke/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/AndreCusimano/rustroke/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/AndreCusimano/rustroke/compare/v0.16.0...v0.17.0

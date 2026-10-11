@@ -1,13 +1,17 @@
 //! Phase 5 demo: containers. A menu bar, a resizable side panel with a
 //! scrolling list, a status bar, floating windows (drag the title, resize
 //! from the corner, close with ×), tooltips and a modal dialog
-//! (File › Quit). On macOS the menu bar sits in a unified title bar,
+//! (File › Quit), and a card ([`Container`]) split by a resizable panel
+//! inside it (`Panel::show_inside`). On macOS the menu bar sits in a unified title bar,
 //! next to the window buttons.
 //!
 //! Run with: `cargo run -p rustroke --example containers` (add
 //! `--features persistence` to keep the layout between runs).
 
-use rustroke::{App, CentralPanel, Frame, Modal, Panel, ScrollArea, Slider, WindowOptions, point};
+use rustroke::{
+    App, Button, CentralPanel, Container, Frame, Modal, Panel, ScrollArea, Separator, Slider,
+    WindowOptions, point,
+};
 
 struct Demo {
     selected: usize,
@@ -17,6 +21,7 @@ struct Demo {
     grid: bool,
     status: String,
     confirm_quit: bool,
+    layer: &'static str,
 }
 
 impl App for Demo {
@@ -99,6 +104,31 @@ impl App for Demo {
             });
             ui.add(Slider::new(&mut self.zoom, 25.0..=400.0).step(5.0).text("Zoom %"));
             ui.checkbox(&mut self.grid, "Show grid");
+            ui.add_space(8.0);
+
+            // A card with its own background, split by panels inside it.
+            let style = ui.style();
+            Container::window(&style)
+                .inner_margin(1.0)
+                .fill_width(true)
+                .fill_height(true)
+                .show(ui, |ui| {
+                    Panel::left("layers")
+                        .default_size(160.0)
+                        .min_size(120.0)
+                        .max_size(260.0)
+                        .show_inside(ui, |ui| {
+                            ui.label("Layers");
+                            for name in ["Sketch", "Dimensions", "Notes"] {
+                                ui.selectable_value(&mut self.layer, name, name);
+                            }
+                        });
+                    CentralPanel::default().show_inside(ui, |ui| {
+                        ui.label(format!("Layer: {}", self.layer));
+                        ui.add(Separator::new().spacing(12.0));
+                        ui.add(Button::new("Delete layer").text_color(style.visuals.error));
+                    });
+                });
         });
 
         rustroke::Window::new("Inspector")
@@ -162,6 +192,7 @@ fn main() -> Result<(), rustroke::RunError> {
             grid: true,
             status: "Ready".into(),
             confirm_quit: false,
+            layer: "Sketch",
         },
     )
 }

@@ -20,7 +20,7 @@ keep in sync.
 
 ```toml
 [dependencies]
-rustroke = "0.18"
+rustroke = "0.19"
 ```
 
 A window with a label, in a couple of lines:
@@ -275,7 +275,8 @@ dialog.show(frame, |ui| {
   with aligned columns, flexbox (grow, wrap, justify) and CSS-style grids
   (fractional columns, spans) computed with taffy.
 - **Containers**: top/bottom/side panels (resizable or as wide as their
-  content), movable and resizable windows, modal dialogs, scroll areas
+  content, at the window's edges or inside any area), groups with a
+  background, border, margins and size limits, movable and resizable windows, modal dialogs, scroll areas
   (vertical, horizontal, both), popup and context menus with submenus,
   collapsible sections and
   trees, tab bars, dockable panels (drag tabs between groups or to a side to
@@ -406,7 +407,7 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.18: widgets, layouts (including flexbox and grids), tables and
+Version 0.19: widgets, containers, layouts (including flexbox and grids), tables and
 trees, code editing, rich text and Markdown, gradients and shadows, drag and drop, saved
 state, accessibility, desktop and browser builds. Everything is tested
 (interaction tests without a window, GPU and software snapshot tests, CI on

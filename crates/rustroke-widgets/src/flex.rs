@@ -69,6 +69,8 @@ pub struct FlexItem {
     shrink: f32,
     basis: Option<f32>,
     align: Option<FlexAlign>,
+    min_size: Vec2,
+    max_size: Vec2,
 }
 
 impl Default for FlexItem {
@@ -86,7 +88,24 @@ impl FlexItem {
             shrink: 1.0,
             basis: None,
             align: None,
+            min_size: Vec2::ZERO,
+            max_size: Vec2::splat(f32::INFINITY),
         }
+    }
+
+    /// Never smaller than this (width, height), in points, even when
+    /// shrinking.
+    pub fn min_size(mut self, size: Vec2) -> Self {
+        self.min_size = size;
+        self
+    }
+
+    /// Never bigger than this (width, height), in points, even when
+    /// growing or stretched; `f32::INFINITY` leaves a side free, e.g.
+    /// `vec2(300.0, f32::INFINITY)` for a column that grows up to 300.
+    pub fn max_size(mut self, size: Vec2) -> Self {
+        self.max_size = size;
+        self
     }
 
     /// Takes this share of the free space (e.g. 1 for every item that
@@ -141,6 +160,8 @@ pub struct Flex {
     gap: Vec2,
     justify: FlexJustify,
     align: FlexAlign,
+    fill_width: bool,
+    fill_height: bool,
 }
 
 impl Flex {
@@ -152,6 +173,8 @@ impl Flex {
             gap: Vec2::splat(8.0),
             justify: FlexJustify::Start,
             align: FlexAlign::Start,
+            fill_width: false,
+            fill_height: false,
         }
     }
 
@@ -189,6 +212,23 @@ impl Flex {
         self
     }
 
+    /// Takes all the available width. A row always does (unless the
+    /// width is unlimited); a column is otherwise as wide as its widest
+    /// item.
+    pub fn fill_width(mut self, fill: bool) -> Self {
+        self.fill_width = fill;
+        self
+    }
+
+    /// Takes all the available height (unless it is unlimited, as in a
+    /// vertically scrolling area): a row's items can then be centered,
+    /// aligned to the bottom or stretched over the whole height. A column
+    /// does this anyway when one of its items grows.
+    pub fn fill_height(mut self, fill: bool) -> Self {
+        self.fill_height = fill;
+        self
+    }
+
     /// Lays out the items added by `add_items`.
     pub fn show<R>(
         self,
@@ -205,17 +245,38 @@ impl Flex {
             .items
             .iter()
             .map(|(item, size)| {
+                // Stretched items get their cross size from the line, at
+                // least their content's.
+                let stretch = item.align.unwrap_or(self.align) == FlexAlign::Stretch;
+                let max = |v: f32| {
+                    if v.is_finite() {
+                        LengthPercentageAuto::length(v)
+                    } else {
+                        LengthPercentageAuto::auto()
+                    }
+                };
+                let (width, height) = match (stretch, row) {
+                    (true, true) => (Dimension::length(size.x), Dimension::auto()),
+                    (true, false) => (Dimension::auto(), Dimension::length(size.y)),
+                    _ => (Dimension::length(size.x), Dimension::length(size.y)),
+                };
+                let (min_width, min_height) = match (stretch, row) {
+                    (true, true) => (item.min_size.x, item.min_size.y.max(size.y)),
+                    (true, false) => (item.min_size.x.max(size.x), item.min_size.y),
+                    _ => (item.min_size.x, item.min_size.y),
+                };
                 let style = taffy::Style {
-                    size: Size {
-                        width: Dimension::length(size.x),
-                        height: Dimension::length(size.y),
-                    },
+                    size: Size { width, height },
                     flex_grow: item.grow,
                     flex_shrink: item.shrink,
                     flex_basis: item.basis.map_or(Dimension::auto(), Dimension::length),
                     min_size: Size {
-                        width: LengthPercentageAuto::length(0.0),
-                        height: LengthPercentageAuto::length(0.0),
+                        width: LengthPercentageAuto::length(min_width),
+                        height: LengthPercentageAuto::length(min_height),
+                    },
+                    max_size: Size {
+                        width: max(item.max_size.x),
+                        height: max(item.max_size.y),
                     },
                     align_self: item.align.map(FlexAlign::taffy),
                     ..Default::default()
@@ -225,6 +286,8 @@ impl Flex {
             .collect();
         let width = available.width();
         let height = available.height();
+        let fill_height = height.is_finite()
+            && (self.fill_height || (!row && memory.items.iter().any(|(i, _)| i.grow > 0.0)));
         let container = taffy::Style {
             display: taffy::Display::Flex,
             flex_direction: if row {
@@ -251,15 +314,12 @@ impl Flex {
             }),
             align_items: Some(self.align.taffy()),
             size: Size {
-                width: if row && width.is_finite() {
+                width: if (row || self.fill_width) && width.is_finite() {
                     Dimension::length(width)
                 } else {
                     Dimension::auto()
                 },
-                height: if !row
-                    && height.is_finite()
-                    && memory.items.iter().any(|(i, _)| i.grow > 0.0)
-                {
+                height: if fill_height {
                     Dimension::length(height)
                 } else {
                     Dimension::auto()
@@ -274,7 +334,11 @@ impl Flex {
             } else {
                 AvailableSpace::MaxContent
             },
-            height: AvailableSpace::MaxContent,
+            height: if fill_height {
+                AvailableSpace::Definite(height)
+            } else {
+                AvailableSpace::MaxContent
+            },
         };
         let _ = tree.compute_layout(root, space);
         let rects: Vec<Rect> = children
@@ -631,5 +695,13 @@ impl GridUi<'_, '_> {
             inner: content.inner,
             response,
         }
+    }
+}
+
+impl<'a> GridUi<'_, 'a> {
+    /// The Ui the grid is in (e.g. for its style, or to register
+    /// something between cells).
+    pub fn ui(&mut self) -> &mut Ui<'a> {
+        self.ui
     }
 }

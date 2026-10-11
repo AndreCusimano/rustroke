@@ -633,6 +633,29 @@ impl<'a> Ui<'a> {
         InnerResponse { inner, response }
     }
 
+    /// A child Ui with id `id` covering `rect` (panels inside a Ui).
+    pub(crate) fn panel_child<R>(
+        &mut self,
+        id: Id,
+        rect: Rect,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> R {
+        let mut child = self.child_with_id(id, rect, Layout::top_down(Align::Min));
+        add_contents(&mut child)
+    }
+
+    /// Continues in `remaining` after a panel took `used` (panels inside
+    /// a Ui).
+    pub(crate) fn shrink_to(&mut self, remaining: Rect, used: Rect) {
+        self.min_rect = self.min_rect.union(used);
+        self.max_rect = remaining;
+        self.cursor = match self.layout.direction {
+            Direction::RightToLeft => Point::new(remaining.max.x, remaining.min.y),
+            _ => remaining.min,
+        };
+        self.row_height = 0.0;
+    }
+
     /// Runs `add_contents` in a child Ui placed in `max_rect` without
     /// moving this Ui's cursor (the caller already reserved the space).
     /// The response covers the area the content used.
@@ -929,6 +952,6 @@ impl<'a> Ui<'a> {
 
     /// A line across the Ui: horizontal in top-down layouts, vertical in rows.
     pub fn separator(&mut self) -> Response {
-        self.add(Separator)
+        self.add(Separator::new())
     }
 }

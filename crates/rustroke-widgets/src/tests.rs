@@ -3218,7 +3218,7 @@ fn floating_scroll_bars_take_no_room() {
                     .max_height(60.0)
                     .show(ui, |ui| {
                         for _ in 0..10 {
-                            row = ui.add(crate::Separator).rect;
+                            row = ui.add(crate::Separator::new()).rect;
                         }
                     });
             });
@@ -4212,4 +4212,178 @@ fn any_widget_can_start_a_drag() {
     );
     assert_eq!(dropped, Some(3));
     assert!(!h.ctx.is_dnd_active());
+}
+
+#[test]
+fn container_paints_behind_its_content_and_limits_its_size() {
+    use crate::{Container, Margin};
+    use rustroke_core::{Color, Shape, Stroke};
+    let fill = Color::from_srgb8(10, 20, 30);
+    let mut h = Harness::new();
+    let mut card = Rect::NOTHING;
+    let mut label = Rect::NOTHING;
+    h.frame(vec![], |ui| {
+        let r = Container::new()
+            .fill(fill)
+            .stroke(Stroke::new(1.0, Color::BLACK))
+            .inner_margin(10.0)
+            .outer_margin(Margin::symmetric(0.0, 5.0))
+            .show(ui, |ui| ui.label("inside").rect);
+        card = r.response.rect;
+        label = r.inner;
+    });
+    assert_eq!(card.min, point(0.0, 5.0));
+    assert_eq!(label.min, point(10.0, 15.0));
+    assert!(
+        (card.max.x - (label.max.x + 10.0)).abs() < 0.5,
+        "{card:?} {label:?}"
+    );
+    let shapes = h.shapes.shapes();
+    let bg = shapes
+        .iter()
+        .position(|s| matches!(s.shape, Shape::Rect { fill: f, .. } if f == fill))
+        .expect("background");
+    let text = shapes
+        .iter()
+        .position(|s| matches!(s.shape, Shape::Text { .. }))
+        .expect("text");
+    assert!(bg < text, "the background is drawn behind the text");
+
+    // Fill the width, at least 100 tall, at most 200 wide.
+    h.frame(vec![], |ui| {
+        card = Container::new()
+            .fill_width(true)
+            .min_size(vec2(0.0, 100.0))
+            .show(ui, |ui| ui.label("x"))
+            .response
+            .rect;
+    });
+    assert_eq!(card.width(), 400.0);
+    assert_eq!(card.height(), 100.0);
+    h.frame(vec![], |ui| {
+        card = Container::new()
+            .fill_width(true)
+            .max_size(vec2(200.0, f32::INFINITY))
+            .show(ui, |ui| ui.label("x"))
+            .response
+            .rect;
+    });
+    assert_eq!(card.width(), 200.0);
+}
+
+#[test]
+fn panels_inside_a_ui_split_its_space() {
+    use crate::{CentralPanel, Panel};
+    let mut h = Harness::new();
+    let run = |h: &mut Harness, events| {
+        let mut out = (Rect::NOTHING, Rect::NOTHING, Rect::NOTHING);
+        h.frame(events, |ui| {
+            ui.label("above");
+            out.0 = Panel::left("side")
+                .default_size(120.0)
+                .min_size(100.0)
+                .max_size(160.0)
+                .show_inside(ui, |ui| ui.label("side"))
+                .response
+                .rect;
+            out.1 = Panel::bottom("status")
+                .show_inside(ui, |ui| ui.label("status"))
+                .response
+                .rect;
+            out.2 = CentralPanel::default().show_inside(ui, |ui| ui.label("main").rect);
+        });
+        out
+    };
+    run(&mut h, vec![]);
+    let (side, status, main) = run(&mut h, vec![]);
+    assert!(side.min.y > 0.0, "below the label: {side:?}");
+    assert_eq!(side.width(), 120.0);
+    assert_eq!(side.max.y, SCREEN.max.y, "full height");
+    assert_eq!(status.min.x, side.max.x);
+    assert_eq!(status.max.y, SCREEN.max.y);
+    assert!(
+        main.min.x >= side.max.x && main.max.y <= status.min.y,
+        "{main:?}"
+    );
+
+    // Dragging the edge stops at the maximum width.
+    let edge = point(side.max.x, 150.0);
+    for events in drag_events(edge, point(300.0, 150.0), 4) {
+        run(&mut h, events);
+    }
+    let (side, _, _) = run(&mut h, vec![]);
+    assert_eq!(side.width(), 160.0);
+    for events in drag_events(point(side.max.x, 150.0), point(0.0, 150.0), 4) {
+        run(&mut h, events);
+    }
+    let (side, _, _) = run(&mut h, vec![]);
+    assert_eq!(side.width(), 100.0);
+}
+
+#[test]
+fn flex_items_respect_max_size_and_rows_fill_the_height() {
+    use crate::{Flex, FlexAlign, FlexItem};
+    let mut h = Harness::new();
+    let mut rects = Vec::new();
+    for _ in 0..3 {
+        rects.clear();
+        h.frame(vec![], |ui| {
+            Flex::row("r")
+                .fill_height(true)
+                .align(FlexAlign::Stretch)
+                .show(ui, |flex| {
+                    rects.push(
+                        flex.add(
+                            FlexItem::new()
+                                .grow(1.0)
+                                .max_size(vec2(150.0, f32::INFINITY)),
+                            |ui| ui.label("a"),
+                        )
+                        .response
+                        .rect,
+                    );
+                    rects.push(
+                        flex.add(FlexItem::new().min_size(vec2(90.0, 0.0)), |ui| {
+                            ui.label("b")
+                        })
+                        .response
+                        .rect,
+                    );
+                });
+        });
+    }
+    assert_eq!(rects[0].width(), 150.0, "{rects:?}");
+    assert_eq!(rects[1].width(), 90.0, "{rects:?}");
+    assert_eq!(rects[0].height(), SCREEN.height(), "stretched: {rects:?}");
+}
+
+#[test]
+fn separator_options_and_widget_text_colors() {
+    use crate::{Button, Separator};
+    use rustroke_core::{Color, Shape, Stroke};
+    let red = Color::from_srgb8(255, 0, 0);
+    let mut h = Harness::new();
+    let mut sep = Rect::NOTHING;
+    h.frame(vec![], |ui| {
+        sep = ui
+            .add(Separator::new().spacing(12.0).stroke(Stroke::new(3.0, red)))
+            .rect;
+        ui.add(Button::new("Red").text_color(red));
+    });
+    assert_eq!(sep.height(), 12.0);
+    let shapes = h.shapes.shapes();
+    assert!(shapes.iter().any(|s| matches!(
+        s.shape,
+        Shape::LineSegment { stroke, .. } if stroke.color == red && stroke.width == 3.0
+    )));
+    assert!(
+        shapes
+            .iter()
+            .any(|s| matches!(s.shape, Shape::Text { color, .. } if color == red))
+    );
+    assert_eq!(Color::default(), Color::TRANSPARENT);
+    assert_eq!(
+        crate::Date::default(),
+        crate::Date::new(1970, 1, 1).unwrap()
+    );
 }
