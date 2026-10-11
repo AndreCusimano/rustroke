@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rustroke_core::{Color, DisplayList, Galley, InputState, Point, Rect, Vec2, vec2};
 use rustroke_text::{Fonts, IconId, IconLayer, RasterizedIcon, TextStyle};
 
-use crate::grid::GridLayout;
+use crate::slots::Slots;
 use crate::widgets::{
     Button, Checkbox, Label, Numeric, RadioButton, SelectableLabel, Separator, Slider, Widget,
 };
@@ -19,15 +19,6 @@ pub struct InnerResponse<R> {
     pub inner: R,
     /// Covers the area the content used.
     pub response: Response,
-}
-
-/// A grid being laid out by this Ui.
-#[derive(Clone, Debug)]
-struct UiGrid {
-    layout: GridLayout,
-    stripe_color: Color,
-    /// Row whose stripe was already painted.
-    painted_row: Option<usize>,
 }
 
 /// Places widgets in a region of the window and draws them.
@@ -55,7 +46,8 @@ pub struct Ui<'a> {
     row_height: f32,
     /// Union of everything placed so far.
     min_rect: Rect,
-    grid: Option<UiGrid>,
+    /// Item placement inside a Stack or Grid.
+    slots: Option<Box<Slots>>,
     /// Inside a popup menu (with the menu's width): buttons highlight
     /// across the menu and close it when clicked.
     in_menu: Option<f32>,
@@ -97,7 +89,7 @@ impl<'a> Ui<'a> {
             cursor: max_rect.min,
             row_height: 0.0,
             min_rect: Rect::NOTHING,
-            grid: None,
+            slots: None,
             in_menu: None,
             enabled: true,
         }
@@ -127,7 +119,7 @@ impl<'a> Ui<'a> {
             cursor,
             row_height: 0.0,
             min_rect: Rect::NOTHING,
-            grid: None,
+            slots: None,
             in_menu: self.in_menu,
             enabled: self.enabled,
         }
@@ -319,9 +311,8 @@ impl<'a> Ui<'a> {
     /// The space left for the next widget.
     pub fn available_rect(&self) -> Rect {
         let max = self.max_rect;
-        if let Some(grid) = &self.grid {
-            let cell = grid.layout.cell_rect(max.max.x);
-            return Rect::from_min_max(cell.min, Point::new(cell.max.x, max.max.y));
+        if let Some(slots) = &self.slots {
+            return slots.available();
         }
         let rect = match self.layout.direction {
             Direction::TopDown => Rect::from_min_max(Point::new(max.min.x, self.cursor.y), max.max),
@@ -437,8 +428,8 @@ impl<'a> Ui<'a> {
 
     /// Where a widget of `size` goes, without advancing.
     fn place(&mut self, size: Vec2) -> Rect {
-        if let Some(grid) = &self.grid {
-            return grid.layout.place(size, self.max_rect.max.x);
+        if let Some(slots) = &mut self.slots {
+            return slots.place(size);
         }
         let layout = self.layout;
         let max = self.max_rect;
@@ -502,8 +493,8 @@ impl<'a> Ui<'a> {
     /// Moves the cursor past `rect`, as if a widget had been placed there.
     fn advance_after_rect(&mut self, rect: Rect) {
         self.min_rect = self.min_rect.union(rect);
-        if let Some(grid) = &mut self.grid {
-            grid.layout.advance(rect);
+        if let Some(slots) = &mut self.slots {
+            slots.advance(rect);
             return;
         }
         let spacing = self.style.spacing.item_spacing;
@@ -558,6 +549,10 @@ impl<'a> Ui<'a> {
 
     /// Adds empty space along the main direction.
     pub fn add_space(&mut self, amount: f32) {
+        if let Some(slots) = &mut self.slots {
+            slots.add_space(amount);
+            return;
+        }
         match self.layout.direction {
             Direction::TopDown => self.cursor.y += amount,
             Direction::LeftToRight => self.cursor.x += amount,
@@ -568,35 +563,88 @@ impl<'a> Ui<'a> {
     /// Ends the current row of a [`crate::Grid`], or starts a new line in
     /// a wrapping row. Does nothing otherwise.
     pub fn end_row(&mut self) {
-        if let Some(grid) = &mut self.grid {
-            grid.layout.end_row();
+        if let Some(slots) = &mut self.slots {
+            slots.end_row();
         } else if self.layout.is_horizontal() {
             self.new_line();
         }
     }
 
-    pub(crate) fn set_grid(&mut self, layout: GridLayout, stripe_color: Color) {
-        self.grid = Some(UiGrid {
-            layout,
-            stripe_color,
-            painted_row: None,
-        });
+    /// A child Ui placing its widgets with `slots` (Stack, Grid);
+    /// returns the result, the slots with the measured items and the
+    /// area used.
+    pub(crate) fn slot_child<R>(
+        &mut self,
+        id: Id,
+        rect: Rect,
+        layout: Layout,
+        slots: Slots,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> (R, Slots, Rect) {
+        let mut child = self.child_with_id(id, rect, layout);
+        child.slots = Some(Box::new(slots));
+        let inner = add_contents(&mut child);
+        let used = child.min_rect();
+        let slots = *child.slots.take().expect("slots set above");
+        (inner, slots, used)
     }
 
-    pub(crate) fn take_grid(&mut self) -> Option<GridLayout> {
-        self.grid.take().map(|g| g.layout)
+    /// Adds `add_contents` as one item of the [`crate::Stack`] this Ui
+    /// lays out, with `item`'s options (grow, size limits, alignment).
+    /// Outside a stack the options are ignored.
+    pub fn stack_item<R>(
+        &mut self,
+        item: crate::StackItem,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        if let Some(slots) = &mut self.slots {
+            slots.next_item = Some(item);
+        }
+        let rect = self.available_rect();
+        self.scope_with(rect, Layout::top_down(Align::Min), add_contents)
+    }
+
+    /// Adds `add_contents` as the next cell of the [`crate::Grid`] this
+    /// Ui lays out, covering `columns` columns and `rows` rows.
+    pub fn grid_span<R>(
+        &mut self,
+        columns: u16,
+        rows: u16,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        self.set_next_cell(None, (columns, rows));
+        let rect = self.available_rect();
+        self.scope_with(rect, Layout::top_down(Align::Min), add_contents)
+    }
+
+    /// Adds `add_contents` in `cell` of the [`crate::Grid`] this Ui lays
+    /// out (column and row from 0, with spans). Cells added afterwards
+    /// continue after it.
+    pub fn grid_cell<R>(
+        &mut self,
+        cell: crate::GridCell,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        self.set_next_cell(
+            Some((cell.column, cell.row)),
+            (cell.column_span, cell.row_span),
+        );
+        let rect = self.available_rect();
+        self.scope_with(rect, Layout::top_down(Align::Min), add_contents)
+    }
+
+    fn set_next_cell(&mut self, pos: Option<(u16, u16)>, span: (u16, u16)) {
+        if let Some(slots) = &mut self.slots
+            && let crate::slots::SlotKind::Grid(grid) = &mut slots.kind
+        {
+            grid.next_cell = Some((pos, span));
+        }
     }
 
     /// Paints the background stripe of a grid row before its first cell.
     fn paint_grid_stripe(&mut self) {
-        let Some(grid) = &mut self.grid else { return };
-        let row = grid.layout.row();
-        if grid.layout.has_started_row() || grid.painted_row == Some(row) {
-            return;
-        }
-        grid.painted_row = Some(row);
-        if let Some(stripe) = grid.layout.stripe() {
-            let color = grid.stripe_color;
+        let Some(slots) = &mut self.slots else { return };
+        if let Some((stripe, color)) = slots.stripe() {
             let radius = self.style.visuals.small_corner_radius;
             self.painter().rect_filled(stripe, radius, color);
         }
@@ -614,6 +662,9 @@ impl<'a> Ui<'a> {
     ) -> InnerResponse<R> {
         self.paint_grid_stripe();
         let id = self.next_auto_id();
+        if self.slots.is_some() {
+            return self.slot_item(id, max_rect, layout, add_contents);
+        }
         // The child's size is only known after its content is added. To
         // align it (e.g. a row inside a centered column), use the size it
         // had in the previous frame, and run another frame if it changed.
@@ -656,6 +707,36 @@ impl<'a> Ui<'a> {
         self.row_height = 0.0;
     }
 
+    /// A child Ui as one item of a Stack or Grid: placed (and aligned)
+    /// by the item's size in the previous frame, with room up to
+    /// `max_rect`'s far corner.
+    fn slot_item<R>(
+        &mut self,
+        id: Id,
+        max_rect: Rect,
+        layout: Layout,
+        add_contents: impl FnOnce(&mut Ui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        let prev_size: Option<Vec2> = self.ctx.data(id);
+        let slots = self.slots.as_mut().expect("in a stack or grid");
+        let target = slots.place_child(prev_size.unwrap_or(Vec2::ZERO));
+        let child_rect = Rect::from_min_max(target.min, max_rect.max.max(target.min));
+        let mut child = self.child_with_id(id, child_rect, layout);
+        let inner = add_contents(&mut child);
+        let used = child.min_rect();
+        if prev_size != Some(used.size()) {
+            self.ctx.insert_data(id, used.size());
+            self.ctx.request_repaint();
+        }
+        let rect = target.union(used);
+        if let Some(slots) = &mut self.slots {
+            slots.set_natural(used.size());
+        }
+        self.advance_after_rect(rect);
+        let response = self.interact(id, rect, Sense::HOVER);
+        InnerResponse { inner, response }
+    }
+
     /// Runs `add_contents` in a child Ui placed in `max_rect` without
     /// moving this Ui's cursor (the caller already reserved the space).
     /// The response covers the area the content used.
@@ -675,7 +756,7 @@ impl<'a> Ui<'a> {
 
     /// Whether children are aligned using their previous size.
     fn needs_child_alignment(&self) -> bool {
-        self.grid.is_none() && !self.layout.cross_justify && self.layout.cross_align != Align::Min
+        self.slots.is_none() && !self.layout.cross_justify && self.layout.cross_align != Align::Min
     }
 
     /// Shifts a child's area along this Ui's cross axis so content of

@@ -159,6 +159,17 @@ pub enum Shape {
     /// Triangles built by the app (vertices in logical points,
     /// premultiplied colors), drawn as they are.
     Mesh(Arc<Mesh>),
+    /// Solid-colored triangles (area fills, heat maps, pie slices): no
+    /// anti-aliasing, so neighbouring triangles join without seams.
+    Triangles {
+        /// Corner positions in logical points.
+        points: Vec<Point>,
+        /// One color per point (straight alpha), blended across each
+        /// triangle.
+        colors: Vec<Color>,
+        /// Three indices into `points` per triangle.
+        indices: Vec<u32>,
+    },
     /// Laid out text drawn through `transform` (rotated, scaled or
     /// sheared): galley coordinates map to the screen with `transform`.
     TransformedText {
@@ -196,6 +207,7 @@ impl Shape {
                 }
             }
             Self::TransformedText { color, .. } => fade(color),
+            Self::Triangles { colors, .. } => colors.iter_mut().for_each(fade),
         }
     }
 
@@ -232,6 +244,9 @@ impl Shape {
             Self::Mesh(mesh) => mesh.vertices.iter().fold(Rect::NOTHING, |r, v| {
                 r.union(Rect::from_min_max(v.pos, v.pos))
             }),
+            Self::Triangles { points, .. } => points
+                .iter()
+                .fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(*p, *p))),
             Self::TransformedText {
                 galley, transform, ..
             } => {

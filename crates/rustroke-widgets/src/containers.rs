@@ -241,7 +241,8 @@ impl Panel {
     /// ```
     ///
     /// Inside a vertically scrolling area a side panel is as tall as its
-    /// content.
+    /// content. Panels split a plain Ui: inside a [`crate::Stack`] or
+    /// [`crate::Grid`], give them one with `ui.vertical(|ui| ..)`.
     pub fn show_inside<R>(
         self,
         ui: &mut Ui<'_>,
@@ -455,7 +456,7 @@ pub struct Window<'open> {
     default_width: f32,
     default_height: Option<f32>,
     resizable: bool,
-    frame: Option<crate::Container>,
+    frame: Option<crate::BoxStyle>,
 }
 
 impl<'open> Window<'open> {
@@ -476,11 +477,11 @@ impl<'open> Window<'open> {
     }
 
     /// Background, border, corner radius, shadow and padding of the
-    /// window instead of the theme's ([`crate::Container::window`]). Its
-    /// inner margin is the space around the content; the outer margin
-    /// and size limits are ignored.
-    pub fn frame(mut self, frame: crate::Container) -> Self {
-        self.frame = Some(frame);
+    /// window instead of the theme's ([`crate::BoxStyle::window`]). The
+    /// padding is the space around the content; margin and sizes are
+    /// ignored.
+    pub fn frame(mut self, frame: impl Into<crate::BoxStyle>) -> Self {
+        self.frame = Some(frame.into());
         self
     }
 
@@ -537,8 +538,8 @@ impl<'open> Window<'open> {
         let pad = style.spacing.window_padding;
         let frame = self
             .frame
-            .unwrap_or_else(|| crate::Container::window(&style));
-        let margin = frame.get_inner_margin();
+            .unwrap_or_else(|| crate::BoxStyle::window(&style));
+        let margin = frame.get_padding();
         let title_height = style.spacing.interact_height + 4.0;
         let screen = ctx.input().screen_rect;
 

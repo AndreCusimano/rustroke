@@ -1,5 +1,7 @@
 //! Interaction tests: feed synthetic input to a [`Context`] and check the
 //! widgets' responses, without any window or GPU.
+// The deprecated Flex, FlexGrid and Container stay tested until removed.
+#![allow(deprecated)]
 
 use rustroke_core::{
     DisplayList, Event, Key, Modifiers, Point, PointerButton, RawInput, Rect, point, vec2,
@@ -4385,5 +4387,267 @@ fn separator_options_and_widget_text_colors() {
     assert_eq!(
         crate::Date::default(),
         crate::Date::new(1970, 1, 1).unwrap()
+    );
+}
+
+/// Runs `add` until the layout stops asking for frames (at most 5).
+fn settle(h: &mut Harness, mut add: impl FnMut(&mut Ui<'_>)) {
+    for _ in 0..5 {
+        if !h.frame(vec![], &mut add).repaint {
+            return;
+        }
+    }
+    panic!("the layout doesn't settle");
+}
+
+#[test]
+fn stack_row_grows_justifies_and_aligns() {
+    use crate::{Justify, Stack, StackAlign, StackItem};
+    let mut h = Harness::new();
+    let mut rects = Vec::new();
+    settle(&mut h, |ui| {
+        rects = Stack::row()
+            .fill_width()
+            .gap(10.0)
+            .align(StackAlign::Center)
+            .show(ui, |ui| {
+                let a = ui.add_sized(vec2(50.0, 40.0), crate::Label::new("a")).rect;
+                let b = ui
+                    .stack_item(StackItem::new().grow(1.0), |ui| {
+                        ui.add_sized(vec2(30.0, 20.0), crate::Label::new("b"))
+                    })
+                    .response
+                    .rect;
+                let c = ui.add_sized(vec2(60.0, 20.0), crate::Label::new("c")).rect;
+                vec![a, b, c]
+            })
+            .inner;
+    });
+    assert_eq!(rects[0].min.x, 0.0);
+    assert_eq!(rects[2].max.x, 400.0, "{rects:?}");
+    assert_eq!(rects[1].width(), 400.0 - 50.0 - 60.0 - 20.0, "b grows");
+    assert_eq!(rects[2].center().y, rects[0].center().y, "centered across");
+
+    settle(&mut h, |ui| {
+        rects = Stack::row()
+            .fill_width()
+            .justify(Justify::SpaceBetween)
+            .show(ui, |ui| {
+                (0..3)
+                    .map(|_| ui.add_sized(vec2(40.0, 20.0), crate::Label::new("x")).rect)
+                    .collect()
+            })
+            .inner;
+    });
+    assert_eq!(rects[1].center().x, 200.0, "{rects:?}");
+    assert_eq!(rects[2].max.x, 400.0);
+}
+
+#[test]
+fn stack_column_box_and_overlay() {
+    use crate::{Stack, StackAlign, StackItem};
+    use rustroke_core::{Color, Shape};
+    let fill = Color::from_srgb8(1, 2, 3);
+    let mut h = Harness::new();
+    let mut out = (Rect::NOTHING, Rect::NOTHING, Vec::new());
+    settle(&mut h, |ui| {
+        let r = Stack::column()
+            .fill(fill)
+            .padding(10.0)
+            .fill_width()
+            .align(StackAlign::Center)
+            .show(ui, |ui| {
+                vec![
+                    ui.add_sized(vec2(100.0, 20.0), crate::Label::new("a")).rect,
+                    ui.add_sized(vec2(50.0, 20.0), crate::Label::new("b")).rect,
+                ]
+            });
+        out.0 = r.response.rect;
+        out.2 = r.inner;
+    });
+    let (card, _, items) = &out;
+    assert_eq!(card.width(), 400.0);
+    assert_eq!(card.height(), 20.0 + 20.0 + 2.0 * 10.0 + ui_spacing_y());
+    assert_eq!(items[0].center().x, 200.0, "centered: {items:?}");
+    assert_eq!(items[1].center().x, 200.0);
+    assert!(h.shapes.shapes().iter().any(
+        |s| matches!(s.shape, Shape::Rect { fill: f, rect, .. } if f == fill && rect == *card)
+    ));
+
+    // Overlay: both items in the same area, the second at the bottom right.
+    let mut rects = Vec::new();
+    let mut size = Rect::NOTHING;
+    settle(&mut h, |ui| {
+        let r = Stack::overlay().show(ui, |ui| {
+            vec![
+                ui.add_sized(vec2(100.0, 60.0), crate::Label::new("back"))
+                    .rect,
+                ui.stack_item(StackItem::new().align(StackAlign::End), |ui| {
+                    ui.add_sized(vec2(20.0, 10.0), crate::Label::new("top"))
+                })
+                .response
+                .rect,
+            ]
+        });
+        size = r.response.rect;
+        rects = r.inner;
+    });
+    assert_eq!(size.size(), vec2(100.0, 60.0));
+    assert_eq!(rects[0].min, size.min);
+    assert_eq!(rects[1].max, rects[0].max, "{rects:?}");
+}
+
+fn ui_spacing_y() -> f32 {
+    crate::Style::default().spacing.item_spacing.y
+}
+
+#[test]
+fn grid_tracks_spans_and_explicit_cells() {
+    use crate::{GridCell, Track};
+    let mut h = Harness::new();
+    let mut r = Vec::new();
+    settle(&mut h, |ui| {
+        r = crate::Grid::new("g")
+            .gap(0.0)
+            .columns([
+                Track::Points(100.0),
+                Track::Fraction(1.0),
+                Track::Fraction(1.0),
+            ])
+            .show(ui, |ui| {
+                let mut v = vec![ui.label("a").rect, ui.label("b").rect, ui.label("c").rect];
+                ui.end_row();
+                v.push(ui.grid_span(2, 1, |ui| ui.label("wide")).response.rect);
+                v.push(ui.label("d").rect);
+                ui.end_row();
+                v.push(
+                    ui.grid_cell(GridCell::at(2, 3), |ui| ui.label("far"))
+                        .response
+                        .rect,
+                );
+                v
+            })
+            .inner;
+    });
+    assert_eq!(r[1].min.x, 100.0, "{r:?}");
+    assert_eq!(r[2].min.x, 250.0, "fractions share the rest");
+    assert_eq!(r[3].min.x, 0.0);
+    assert_eq!(r[4].min.x, 250.0, "after the span");
+    assert!(r[4].min.y > r[0].max.y);
+    assert_eq!(r[5].min.x, 250.0);
+    assert!(r[5].min.y > r[4].max.y);
+}
+
+#[test]
+fn nested_stacks_settle_and_add_space_counts() {
+    use crate::Stack;
+    let mut h = Harness::new();
+    let mut b = Rect::NOTHING;
+    settle(&mut h, |ui| {
+        Stack::column()
+            .fill(rustroke_core::Color::WHITE)
+            .show(ui, |ui| {
+                Stack::row().show(ui, |ui| {
+                    ui.label("a");
+                    ui.add_space(30.0);
+                    b = ui.label("b").rect;
+                });
+                Stack::row().fill_width().show(ui, |ui| {
+                    ui.text_edit_singleline(&mut String::new());
+                    ui.separator();
+                });
+                ui.label("long text in a column that wraps when the space runs out");
+            });
+    });
+    let a_width = h
+        .ctx
+        .widgets()
+        .iter()
+        .find(|w| w.info.label == "a")
+        .map(|w| w.rect.max.x)
+        .unwrap();
+    assert!(b.min.x >= a_width + 30.0, "{b:?} {a_width}");
+}
+
+#[test]
+fn growing_field_fills_only_its_share() {
+    use crate::{Stack, StackAlign, StackItem};
+    let mut h = Harness::new();
+    let mut s = String::new();
+    let mut rects = Vec::new();
+    settle(&mut h, |ui| {
+        rects.clear();
+        Stack::row()
+            .fill_width()
+            .align(StackAlign::Center)
+            .padding(6.0)
+            .show(ui, |ui| {
+                rects.push(ui.button("Open").rect);
+                rects.push(
+                    ui.stack_item(StackItem::new().grow(1.0), |ui| {
+                        let w = ui.available_width();
+                        ui.add(crate::TextEdit::singleline(&mut s).desired_width(w))
+                    })
+                    .response
+                    .rect,
+                );
+                rects.push(ui.button("Go").rect);
+            });
+    });
+    assert!(rects[1].max.x < rects[2].min.x, "{rects:?}");
+    assert!((rects[2].max.x - 394.0).abs() < 0.5, "{rects:?}");
+}
+
+#[test]
+fn plot_pans_resets_hides_series_and_follows() {
+    use crate::{Corner, Line, Plot, PlotBounds};
+    let mut h = Harness::new();
+    let data: Vec<[f64; 2]> = (0..=10).map(|i| [f64::from(i), f64::from(i)]).collect();
+    let other: Vec<[f64; 2]> = vec![[0.0, 100.0], [10.0, 100.0]];
+    let run = |h: &mut Harness, events, follow: Option<f64>| {
+        let mut out = None;
+        h.frame(events, |ui| {
+            let mut plot = Plot::new("p").height(200.0).legend(Corner::TopRight);
+            if let Some(w) = follow {
+                plot = plot.follow_x(w);
+            }
+            out = Some(plot.show(ui, |p| {
+                p.line(Line::new(&data).name("a"));
+                p.line(Line::new(&other).name("b"));
+            }));
+        });
+        out.unwrap()
+    };
+    let r = run(&mut h, vec![], None);
+    let first: PlotBounds = r.bounds;
+    assert!(first.min[0] < 0.0 && first.max[0] > 10.0, "{first:?}");
+    assert!(first.max[1] > 100.0, "includes series b");
+
+    // Drag to the right: the view moves left.
+    let c = r.response.rect.center();
+    for events in drag_events(c, c + vec2(50.0, 0.0), 2) {
+        run(&mut h, events, None);
+    }
+    let panned = run(&mut h, vec![], None).bounds;
+    assert!(panned.min[0] < first.min[0] - 0.5, "{panned:?}");
+
+    // Double-click resets.
+    run(&mut h, click_events(c), None);
+    run(&mut h, click_events(c), None);
+    let reset = run(&mut h, vec![], None).bounds;
+    assert_eq!(reset, first);
+
+    // Clicking "b" in the legend hides it: the y range shrinks.
+    // The second legend row, near the top-right corner.
+    let entry = r.response.rect.right_top() + vec2(-30.0, 45.0);
+    run(&mut h, click_events(entry), None);
+    let hidden = run(&mut h, vec![], None).bounds;
+    assert!(hidden.max[1] < 50.0, "b hidden: {hidden:?}");
+
+    // Following the last 4 units of x.
+    let follow = run(&mut h, vec![], Some(4.0)).bounds;
+    assert!(
+        (follow.min[0] - 6.0).abs() < 1e-9 && (follow.max[0] - 10.0).abs() < 1e-9,
+        "{follow:?}"
     );
 }

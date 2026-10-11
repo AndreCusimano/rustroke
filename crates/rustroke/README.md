@@ -9,6 +9,13 @@ So I built my own: **simple, fast, and up and running in a couple of lines.**
 And yes, you can use it in your commercial projects too: it's dual-licensed
 under **MIT** and **Apache 2.0**, so no worries.
 
+Prefer to draw your windows instead of writing them?
+**[Rustroke Toolkit](https://github.com/AndreCusimano/rustroke-toolkit)** is a
+visual designer built with Rustroke: pick widgets from a palette, drop them on
+a canvas, set their properties, and it writes the Rustroke code for you. Canvas
+and code stay in sync in both directions, so you can switch between drawing
+and typing at any time.
+
 ---
 
 Rustroke is an **immediate-mode GUI library for Rust** with its own GPU
@@ -20,7 +27,7 @@ keep in sync.
 
 ```toml
 [dependencies]
-rustroke = "0.19"
+rustroke = "0.20"
 ```
 
 A window with a label, in a couple of lines:
@@ -271,16 +278,26 @@ dialog.show(frame, |ui| {
   buttons with menus of variants, property
   grids, separators. Any widget can be disabled, and buttons and fields
   can have their own colors, borders, radius and size.
-- **Layout**: rows, columns, alignment, wrapping, fixed-size widgets, grids
-  with aligned columns, flexbox (grow, wrap, justify) and CSS-style grids
-  (fractional columns, spans) computed with taffy.
+- **Layout**: two containers. A stack puts widgets in a row, a column or
+  one over the other, aligned, wrapped, spread and grown like flexbox; a
+  grid puts them in rows and columns (content-sized, fixed or fractional,
+  cells spanning several). Both sit in a box with a background (color,
+  gradient or image: stretched, fitted, covering, centered or tiled),
+  border, rounded corners, shadow, padding, margin and a size (content,
+  fill, fixed, minimum and maximum).
 - **Containers**: top/bottom/side panels (resizable or as wide as their
-  content, at the window's edges or inside any area), groups with a
-  background, border, margins and size limits, movable and resizable windows, modal dialogs, scroll areas
+  content, at the window's edges or inside any area), movable and resizable windows, modal dialogs, scroll areas
   (vertical, horizontal, both), popup and context menus with submenus,
   collapsible sections and
   trees, tab bars, dockable panels (drag tabs between groups or to a side to
   split), tooltips.
+- **Charts**: lines (solid, dashed, dotted, each series with its own color
+  and width), areas, scatter points, bars (stacked, horizontal),
+  histograms, heat maps, reference lines and annotations on x/y axes with
+  ticks, grid, logarithmic or inverted scales, formatted labels, a
+  clickable legend, a tooltip with the nearest value, minimum and maximum
+  markers, panning and zooming with limits, and live data that scrolls;
+  pie and donut charts.
 - **Rich text**: labels mixing styles, colors, highlights, underline and
   links; Markdown documents (optional `markdown` feature: headings, lists,
   quotes, code blocks, tables, images).
@@ -329,6 +346,105 @@ dialog.show(frame, |ui| {
 
 Desktop: macOS, Windows, Linux. Minimum Rust version: 1.89.
 
+## Components
+
+Every component in one line, by category.
+
+**Text**
+
+| Component | What it is |
+|---|---|
+| `Label` | Text, wrapping to the width; rich text with several styles and links (`Label::rich`). Shorthands: `ui.label`, `ui.heading`. |
+| `Hyperlink` | A link that opens a URL, or link-styled text that reacts to clicks. |
+| `Markdown` | A Markdown document: headings, lists, tables, code, images (feature `markdown`). |
+
+**Buttons and choices**
+
+| Component | What it is |
+|---|---|
+| `Button` | A clickable button with text, an icon or both. |
+| `ToolButton` | A large frameless toolbar icon, highlighted while its tool is active, optionally with a menu of variants. |
+| `IconToggle` | An icon that switches a `bool` (eye open/closed, lock). |
+| `Checkbox` | A box that toggles a `bool`, with a label. |
+| `RadioButton` | One choice of several; `ui.radio_value` sets a value when chosen. |
+| `SelectableLabel` | Text highlighted when selected, for choices in lists and menus; `ui.selectable_value`. |
+| `ComboBox` | A drop-down list showing the current choice. |
+
+**Values and input**
+
+| Component | What it is |
+|---|---|
+| `TextEdit` | A field to edit text: one line, several lines, password, or code (monospace, Tab, line numbers, syntax colors). |
+| `SearchField` | A one-line field for filtering, with a magnifying glass and a clear button. |
+| `Slider` | A handle dragged along a track to pick a number in a range. |
+| `DragValue` | A number changed by dragging sideways or typed, with units and limits. |
+| `ColorPicker` | A color swatch that opens a picker (hue, saturation/value, opacity, hex). |
+| `DatePicker` | A date box that opens a calendar. |
+| `TimePicker` | Hours and minutes, dragged or typed. |
+| `ReferenceField` | A reference to another object (a sketch, a face) with a button to clear it. |
+
+**Feedback**
+
+| Component | What it is |
+|---|---|
+| `ProgressBar` | A bar showing how much of a task is done, or that it is running. |
+| `Spinner` | A rotating arc: something is in progress. |
+| `Toast` | A short message in a corner for a few seconds (`Context::toast`). |
+| Tooltip (`Response::on_hover_text`) | Text shown while the pointer rests on a widget. |
+
+**Images and icons**
+
+| Component | What it is |
+|---|---|
+| `Image` | An image loaded with `Context::load_texture`, scaled and with rounded corners. |
+| `AnimatedImage` | A GIF, APNG or animated WebP, played with the app's clock. |
+| `Icon` | An SVG icon drawn in the theme's colors. |
+
+**Layout**
+
+| Component | What it is |
+|---|---|
+| `Stack` | Widgets in a row, a column or one over the other, aligned, spread, wrapped and grown like flexbox, in a box with background, border, padding and size. `ui.horizontal` / `ui.vertical` are the short forms. |
+| `Grid` | Widgets in rows and columns (content-sized, fixed or fractional), cells spanning several, in the same kind of box. |
+| `Separator` | A thin line between groups; `ui.separator`. |
+
+**Areas and windows**
+
+| Component | What it is |
+|---|---|
+| `Panel` | A bar along an edge of the window or of an area: toolbar, sidebar, status bar; resizable, with limits. |
+| `CentralPanel` | Everything left after the panels. |
+| `ScrollArea` | Content larger than its area, scrolled vertically, horizontally or both; only the visible rows of long lists. |
+| `Window` | A floating window inside the app: moved, resized, closed, brought to the front. |
+| `Modal` | A dialog that blocks the rest of the window until it is answered. |
+| `CollapsingHeader` | A section that opens and closes; nested, a tree. |
+| `TabBar` | A row of tabs that can be closed, added and reordered. |
+| `DockArea` | Panels as tab groups in resizable splits; tabs are dragged between groups or to a side. |
+
+**Lists and data**
+
+| Component | What it is |
+|---|---|
+| `List` | Rows of your items to select (also several) and reorder by dragging. |
+| `Tree` | Nodes that expand and collapse, with selection, for any amount of data. |
+| `Table` | Rows and columns with a fixed header, resizable and sortable columns, millions of rows. |
+| `PropertyGrid` | Names and editable values in two aligned columns, by sections (an inspector). |
+
+**Charts**
+
+| Component | What it is |
+|---|---|
+| `Plot` | Data on x/y axes: lines (solid, dashed, dotted), areas, points, bars (stacked, horizontal), histograms, heat maps, reference lines and text; ticks, grid, log scale, legend, tooltip, pan and zoom, live data with `PlotBuffer` and `Plot::follow_x`. |
+| `PieChart` | A pie or donut chart with percentages and a legend. |
+
+**Menus**
+
+| Component | What it is |
+|---|---|
+| Menu (`Ui::menu_button`) | A button that opens a menu, with submenus and icons; menu bars. |
+| Context menu (`Response::context_menu`) | A menu opened with a right click on a widget. |
+| Popup (`Ui::popup_below`) | Any content in a popup below a widget. |
+
 ## Performance
 
 - **Idle apps use no CPU**: the window only redraws on input, animations or
@@ -357,7 +473,8 @@ cargo run -p rustroke --example rich_text --features markdown   # rich text, Mar
 cargo run -p rustroke --example graphics    # gradients, shadows, curves, transforms, animation
 cargo run -p rustroke --example platform --features native-menu,tray   # drag and drop, files, menu bar, tray
 cargo run -p rustroke --example pickers     # color, date and time pickers, toasts
-cargo run -p rustroke --example flex        # flexbox and grid layouts
+cargo run -p rustroke --example stack       # stacks, grids and box backgrounds
+cargo run -p rustroke --example charts      # line, area, scatter, bar, histogram, heat map, pie charts
 cargo run -p rustroke --example text_input  # text fields: selection, clipboard, IME
 cargo run -p rustroke --example themes      # live theme editor
 cargo run -p rustroke --example extras      # images, disabled widgets, accessibility
@@ -407,13 +524,13 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.19: widgets, containers, layouts (including flexbox and grids), tables and
+Version 0.20: widgets, stacks and grids, charts, tables and
 trees, code editing, rich text and Markdown, gradients and shadows, drag and drop, saved
 state, accessibility, desktop and browser builds. Everything is tested
 (interaction tests without a window, GPU and software snapshot tests, CI on
 macOS, Windows, Linux and WebAssembly). Known limitations are listed in the
-[changelog](CHANGELOG.md). Coming next: a visual screen designer built with
-Rustroke itself.
+[changelog](CHANGELOG.md). The visual designer built with Rustroke itself is
+[Rustroke Toolkit](https://github.com/AndreCusimano/rustroke-toolkit).
 
 ## Development
 

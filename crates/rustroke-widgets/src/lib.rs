@@ -34,10 +34,13 @@ mod list;
 mod markdown;
 mod modal;
 mod pickers;
+mod plot;
 mod popup;
 mod property_grid;
 mod response;
 mod search_field;
+mod slots;
+mod stack;
 mod style;
 mod table;
 mod tabs;
@@ -52,18 +55,18 @@ pub use accessibility::{NumericInfo, WidgetDescription, WidgetInfo, WidgetRole};
 pub use automation::Automation;
 pub use collapsing::{CollapsingHeader, CollapsingResponse};
 pub use combo_box::ComboBox;
-pub use container::{Container, Margin};
+#[allow(deprecated)]
+pub use container::Container;
+pub use container::{Background, BoxStyle, ImageFit, Margin, Sizing};
 pub use containers::{CentralPanel, Panel, PanelSide, ScrollArea, UiRoot, Window};
 pub use context::{
     Context, CursorIcon, FrameOutput, LayerId, Order, Persist, RepaintHandle, Sense, TextureHandle,
 };
 pub use dock::{DockArea, DockNode, DockState, DockViewer, SplitAxis};
 pub use drag_value::DragValue;
-pub use flex::{
-    Flex, FlexAlign, FlexDirection, FlexGrid, FlexItem, FlexJustify, FlexUi, GridCell, GridUi,
-    Track,
-};
-pub use grid::Grid;
+#[allow(deprecated)]
+pub use flex::{Flex, FlexAlign, FlexDirection, FlexGrid, FlexItem, FlexJustify, FlexUi, GridUi};
+pub use grid::{Grid, GridCell, Track};
 pub use id::Id;
 pub use inspector::show_inspector;
 pub use layout::{Align, Direction, Layout};
@@ -72,9 +75,15 @@ pub use list::{List, ListResponse};
 pub use markdown::{ImageLoader, Markdown};
 pub use modal::{Modal, ModalResponse};
 pub use pickers::{ColorPicker, Date, DatePicker, TimePicker, days_in_month};
+pub use plot::{
+    Axis, Bar, BarChart, Colormap, Corner, HLine, HeatMap, Line, LineStyle, MarkerShape, PieChart,
+    PieResponse, Plot, PlotBounds, PlotBuffer, PlotPoints, PlotResponse, PlotText, PlotUi, Points,
+    TickFormatter, Ticks, VLine,
+};
 pub use property_grid::{PropertyGrid, PropertyGridUi, ReferenceField};
 pub use response::{FocusLost, Response};
 pub use search_field::SearchField;
+pub use stack::{Justify, Stack, StackAlign, StackDirection, StackItem};
 pub use style::{Spacing, Style, Visuals, WidgetVisuals};
 pub use table::{Column, SortOrder, Table, TableResponse};
 pub use tabs::{TabBar, TabBarResponse, TabLabel};

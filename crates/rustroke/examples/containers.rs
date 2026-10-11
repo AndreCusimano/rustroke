@@ -1,7 +1,7 @@
 //! Phase 5 demo: containers. A menu bar, a resizable side panel with a
 //! scrolling list, a status bar, floating windows (drag the title, resize
 //! from the corner, close with ×), tooltips and a modal dialog
-//! (File › Quit), and a card ([`Container`]) split by a resizable panel
+//! (File › Quit), and a card (a `Stack` with a background) split by a resizable panel
 //! inside it (`Panel::show_inside`). On macOS the menu bar sits in a unified title bar,
 //! next to the window buttons.
 //!
@@ -9,7 +9,7 @@
 //! `--features persistence` to keep the layout between runs).
 
 use rustroke::{
-    App, Button, CentralPanel, Container, Frame, Modal, Panel, ScrollArea, Separator, Slider,
+    App, BoxStyle, Button, CentralPanel, Frame, Modal, Panel, ScrollArea, Separator, Slider, Stack,
     WindowOptions, point,
 };
 
@@ -108,11 +108,13 @@ impl App for Demo {
 
             // A card with its own background, split by panels inside it.
             let style = ui.style();
-            Container::window(&style)
-                .inner_margin(1.0)
-                .fill_width(true)
-                .fill_height(true)
+            Stack::column()
+                .style(BoxStyle::window(&style).padding(1.0))
+                .fill_width()
+                .fill_height()
                 .show(ui, |ui| {
+                    // Panels split a plain Ui: give them one inside the stack.
+                    ui.vertical(|ui| {
                     Panel::left("layers")
                         .default_size(160.0)
                         .min_size(120.0)
@@ -127,6 +129,7 @@ impl App for Demo {
                         ui.label(format!("Layer: {}", self.layer));
                         ui.add(Separator::new().spacing(12.0));
                         ui.add(Button::new("Delete layer").text_color(style.visuals.error));
+                    });
                     });
                 });
         });

@@ -1,4 +1,6 @@
-//! Flexbox and CSS-grid style layouts, computed with taffy.
+//! Flexbox and CSS-grid style layouts, computed with taffy (deprecated:
+//! [`crate::Stack`] and [`crate::Grid`] do the same with a box around).
+#![allow(deprecated)]
 //!
 //! Like [`crate::Grid`], they use the sizes their items had in the
 //! previous frame, so a layout settles in two frames.
@@ -10,10 +12,11 @@ use taffy::prelude::{
     AvailableSpace, Dimension, LengthPercentage, LengthPercentageAuto, NodeId, Size, TaffyTree,
 };
 
-use crate::{Align, Id, InnerResponse, Layout, Ui};
+use crate::{Align, GridCell, Id, InnerResponse, Layout, Track, Ui};
 
 /// Which way a [`Flex`] container lays out its items.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[deprecated(since = "0.20.0", note = "use `StackDirection` with `Stack`")]
 pub enum FlexDirection {
     /// Left to right.
     Row,
@@ -23,6 +26,7 @@ pub enum FlexDirection {
 
 /// How items share the free space along the main axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[deprecated(since = "0.20.0", note = "use `Justify` with `Stack`")]
 pub enum FlexJustify {
     /// Packed at the start.
     Start,
@@ -40,6 +44,7 @@ pub enum FlexJustify {
 
 /// Where items sit across the main axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[deprecated(since = "0.20.0", note = "use `StackAlign` with `Stack`")]
 pub enum FlexAlign {
     /// At the start (top of a row).
     Start,
@@ -64,6 +69,7 @@ impl FlexAlign {
 
 /// How one item of a [`Flex`] container grows, shrinks and aligns.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[deprecated(since = "0.20.0", note = "use `StackItem` with `Ui::stack_item`")]
 pub struct FlexItem {
     grow: f32,
     shrink: f32,
@@ -153,6 +159,10 @@ struct FlexMemory {
 /// });
 /// ```
 #[derive(Clone, Debug)]
+#[deprecated(
+    since = "0.20.0",
+    note = "use `Stack::row()` / `Stack::column()` (with `Ui::stack_item` for grow and limits)"
+)]
 pub struct Flex {
     id_salt: Id,
     direction: FlexDirection,
@@ -385,6 +395,7 @@ impl Flex {
 }
 
 /// Adds items to a [`Flex`] (or [`FlexGrid`]) container.
+#[deprecated(since = "0.20.0", note = "use `Stack`, whose content is a normal `Ui`")]
 pub struct FlexUi<'u, 'a> {
     ui: &'u mut Ui<'a>,
     id: Id,
@@ -450,60 +461,6 @@ impl<'a> FlexUi<'_, 'a> {
     }
 }
 
-/// A size in a [`FlexGrid`] track list.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Track {
-    /// Fixed, in points.
-    Points(f32),
-    /// A share of the free space (`1fr`).
-    Fraction(f32),
-    /// As big as its content.
-    Auto,
-}
-
-impl Track {
-    fn taffy(self) -> taffy::TrackSizingFunction {
-        match self {
-            Self::Points(p) => taffy::prelude::length(p),
-            Self::Fraction(f) => taffy::prelude::fr(f),
-            Self::Auto => taffy::prelude::auto(),
-        }
-    }
-}
-
-/// Where an item goes in a [`FlexGrid`]: column and row (from 0) and how
-/// many it spans.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct GridCell {
-    /// First column.
-    pub column: u16,
-    /// First row.
-    pub row: u16,
-    /// Columns covered (at least 1).
-    pub column_span: u16,
-    /// Rows covered (at least 1).
-    pub row_span: u16,
-}
-
-impl GridCell {
-    /// The cell at `column`, `row`.
-    pub fn at(column: u16, row: u16) -> Self {
-        Self {
-            column,
-            row,
-            column_span: 1,
-            row_span: 1,
-        }
-    }
-
-    /// Spanning `columns` columns and `rows` rows.
-    pub fn span(mut self, columns: u16, rows: u16) -> Self {
-        self.column_span = columns.max(1);
-        self.row_span = rows.max(1);
-        self
-    }
-}
-
 /// A CSS-style grid: column widths as fixed points, shares of the free
 /// space (`fr`) or content size, items placed in cells that may span
 /// several columns and rows (computed with taffy). For simple aligned
@@ -517,6 +474,10 @@ impl GridCell {
 /// });
 /// ```
 #[derive(Clone, Debug)]
+#[deprecated(
+    since = "0.20.0",
+    note = "use `Grid` with `Grid::columns` and `Ui::grid_cell` / `Ui::grid_span`"
+)]
 pub struct FlexGrid {
     id_salt: Id,
     columns: Vec<Track>,
@@ -657,6 +618,7 @@ impl FlexGrid {
 }
 
 /// Adds cells to a [`FlexGrid`].
+#[deprecated(since = "0.20.0", note = "use `Grid`, whose content is a normal `Ui`")]
 pub struct GridUi<'u, 'a> {
     ui: &'u mut Ui<'a>,
     id: Id,

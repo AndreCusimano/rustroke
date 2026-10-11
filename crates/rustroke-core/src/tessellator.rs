@@ -213,6 +213,37 @@ impl Tessellator {
                 mesh.vertices.extend_from_slice(&m.vertices);
                 mesh.indices.extend(m.indices.iter().map(|i| i + base));
             }
+            Shape::Triangles {
+                points,
+                colors,
+                indices,
+            } => {
+                let base = mesh.next_index();
+                let uv = self.white_uv;
+                mesh.vertices
+                    .extend(points.iter().enumerate().map(|(i, &pos)| {
+                        let c = colors
+                            .get(i)
+                            .or(colors.last())
+                            .copied()
+                            .unwrap_or(Color::WHITE);
+                        Vertex {
+                            pos,
+                            uv,
+                            color: [c.r * c.a, c.g * c.a, c.b * c.a, c.a],
+                        }
+                    }));
+                let count = u32::try_from(points.len()).unwrap_or(u32::MAX);
+                mesh.indices.extend(
+                    indices
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .filter(|t| t.iter().all(|&i| i < count))
+                        .flatten()
+                        .map(|i| i + base),
+                );
+            }
             // Drawn by the renderer (see `tessellate`), not as triangles.
             Shape::Callback(_) => {}
             Shape::Image {
@@ -879,6 +910,27 @@ mod tests {
             (a - 100.0).abs() < 0.5 && (b - 100.0).abs() < 0.5,
             "{a} vs {b}"
         );
+    }
+
+    #[test]
+    fn triangles_cover_exactly_their_area() {
+        // A square as two triangles, half transparent; a bad index is
+        // skipped.
+        let mesh = tessellate(
+            Shape::Triangles {
+                points: vec![
+                    point(0.0, 0.0),
+                    point(10.0, 0.0),
+                    point(10.0, 10.0),
+                    point(0.0, 10.0),
+                ],
+                colors: vec![Color::WHITE.with_alpha(0.5)],
+                indices: vec![0, 1, 2, 0, 2, 3, 0, 1, 9],
+            },
+            1.0,
+        );
+        assert_eq!(mesh.indices.len(), 6);
+        assert!((coverage(&mesh) - 50.0).abs() < 1e-3);
     }
 
     #[test]

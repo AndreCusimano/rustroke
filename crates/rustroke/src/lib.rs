@@ -77,15 +77,20 @@
 //!   colors and sizes with `.fill(..)`, `.stroke(..)`,
 //!   `.corner_radius(..)` and `.min_size(..)`. Implement [`Widget`] for
 //!   your own.
-//! - **Layout**: a [`Ui`] stacks widgets top to bottom. Use
-//!   [`Ui::horizontal`], [`Ui::vertical_centered`], [`Ui::with_layout`]
-//!   (e.g. [`Layout::right_to_left`]) and [`Grid`] for tables; [`Flex`]
-//!   (flexbox: wrapping, growing, justified items) and [`FlexGrid`]
-//!   (CSS-style grid with fractional columns and spans).
+//! - **Layout**: a [`Ui`] stacks widgets top to bottom. Two containers
+//!   arrange widgets, both in a box that can have a background (color,
+//!   gradient or image, see [`Background`]), border, corners, shadow,
+//!   padding, margin and a size (content, fill, fixed, with limits; see
+//!   [`BoxStyle`]): [`Stack`] puts them in a row, a column or one over the
+//!   other ([`Stack::overlay`]), aligned and spread like flexbox, with
+//!   per-item options through [`Ui::stack_item`] (grow, limits, alignment);
+//!   [`Grid`] puts them in rows and columns (content-sized, fixed or
+//!   fractional [`Track`]s, cells spanning columns and rows with
+//!   [`Ui::grid_span`] / [`Ui::grid_cell`]). [`Ui::horizontal`] and
+//!   [`Ui::vertical`] are the short forms for a plain row or column.
 //! - **Containers**: [`Panel`] (top/bottom/left/right bars, also inside a
 //!   Ui with [`Panel::show_inside`]), the central
-//!   area ([`Frame::ui`] or [`CentralPanel`]), [`Container`] (background,
-//!   border, margins and size limits for a group of widgets), floating [`Window`]s,
+//!   area ([`Frame::ui`] or [`CentralPanel`]), floating [`Window`]s,
 //!   modal dialogs ([`Modal`]), [`ScrollArea`] (vertical, horizontal or
 //!   both; [`ScrollArea::show_rows`] lays out only the visible rows,
 //!   [`Ui::scroll_to_rect`] brings something into view), popup menus with submenus ([`Ui::menu_button`], with an icon
@@ -183,10 +188,109 @@
 //! The `examples/` directory has a runnable demo for each topic:
 //! `cargo run -p rustroke --example widgets` (and `properties`, `lists`,
 //! `table`, `rich_text` with `--features markdown`, `graphics`,
-//! `platform` with `--features native-menu,tray`, `pickers`, `flex`,
+//! `platform` with `--features native-menu,tray`, `pickers`, `stack`, `charts`,
 //! `docking`, `windows`, `files`, `custom_wgpu`, `integration`, `layout`,
 //! `containers`, `text_input`, `themes`, `extras`, `text`, `shapes`,
 //! `hello`).
+//!
+//! # Components
+//!
+//! Every component in one line, by category.
+//!
+//! **Text**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`Label`] | Text, wrapping to the width; rich text with several styles and links (`Label::rich`). Shorthands: `ui.label`, `ui.heading`. |
+//! | [`Hyperlink`] | A link that opens a URL, or link-styled text that reacts to clicks. |
+//! | [`Markdown`] | A Markdown document: headings, lists, tables, code, images (feature `markdown`). |
+//!
+//! **Buttons and choices**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`Button`] | A clickable button with text, an icon or both. |
+//! | [`ToolButton`] | A large frameless toolbar icon, highlighted while its tool is active, optionally with a menu of variants. |
+//! | [`IconToggle`] | An icon that switches a `bool` (eye open/closed, lock). |
+//! | [`Checkbox`] | A box that toggles a `bool`, with a label. |
+//! | [`RadioButton`] | One choice of several; `ui.radio_value` sets a value when chosen. |
+//! | [`SelectableLabel`] | Text highlighted when selected, for choices in lists and menus; `ui.selectable_value`. |
+//! | [`ComboBox`] | A drop-down list showing the current choice. |
+//!
+//! **Values and input**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`TextEdit`] | A field to edit text: one line, several lines, password, or code (monospace, Tab, line numbers, syntax colors). |
+//! | [`SearchField`] | A one-line field for filtering, with a magnifying glass and a clear button. |
+//! | [`Slider`] | A handle dragged along a track to pick a number in a range. |
+//! | [`DragValue`] | A number changed by dragging sideways or typed, with units and limits. |
+//! | [`ColorPicker`] | A color swatch that opens a picker (hue, saturation/value, opacity, hex). |
+//! | [`DatePicker`] | A date box that opens a calendar. |
+//! | [`TimePicker`] | Hours and minutes, dragged or typed. |
+//! | [`ReferenceField`] | A reference to another object (a sketch, a face) with a button to clear it. |
+//!
+//! **Feedback**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`ProgressBar`] | A bar showing how much of a task is done, or that it is running. |
+//! | [`Spinner`] | A rotating arc: something is in progress. |
+//! | [`Toast`] | A short message in a corner for a few seconds (`Context::toast`). |
+//! | Tooltip ([`Response::on_hover_text`]) | Text shown while the pointer rests on a widget. |
+//!
+//! **Images and icons**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`Image`] | An image loaded with `Context::load_texture`, scaled and with rounded corners. |
+//! | [`AnimatedImage`] | A GIF, APNG or animated WebP, played with the app's clock. |
+//! | [`Icon`] | An SVG icon drawn in the theme's colors. |
+//!
+//! **Layout**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`Stack`] | Widgets in a row, a column or one over the other, aligned, spread, wrapped and grown like flexbox, in a box with background, border, padding and size. `ui.horizontal` / `ui.vertical` are the short forms. |
+//! | [`Grid`] | Widgets in rows and columns (content-sized, fixed or fractional), cells spanning several, in the same kind of box. |
+//! | [`Separator`] | A thin line between groups; `ui.separator`. |
+//!
+//! **Areas and windows**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`Panel`] | A bar along an edge of the window or of an area: toolbar, sidebar, status bar; resizable, with limits. |
+//! | [`CentralPanel`] | Everything left after the panels. |
+//! | [`ScrollArea`] | Content larger than its area, scrolled vertically, horizontally or both; only the visible rows of long lists. |
+//! | [`Window`] | A floating window inside the app: moved, resized, closed, brought to the front. |
+//! | [`Modal`] | A dialog that blocks the rest of the window until it is answered. |
+//! | [`CollapsingHeader`] | A section that opens and closes; nested, a tree. |
+//! | [`TabBar`] | A row of tabs that can be closed, added and reordered. |
+//! | [`DockArea`] | Panels as tab groups in resizable splits; tabs are dragged between groups or to a side. |
+//!
+//! **Lists and data**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`List`] | Rows of your items to select (also several) and reorder by dragging. |
+//! | [`Tree`] | Nodes that expand and collapse, with selection, for any amount of data. |
+//! | [`Table`] | Rows and columns with a fixed header, resizable and sortable columns, millions of rows. |
+//! | [`PropertyGrid`] | Names and editable values in two aligned columns, by sections (an inspector). |
+//!
+//! **Charts**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | [`Plot`] | Data on x/y axes: lines (solid, dashed, dotted), areas, points, bars (stacked, horizontal), histograms, heat maps, reference lines and text; ticks, grid, log scale, legend, tooltip, pan and zoom, live data with `PlotBuffer` and `Plot::follow_x`. |
+//! | [`PieChart`] | A pie or donut chart with percentages and a legend. |
+//!
+//! **Menus**
+//!
+//! | Component | What it is |
+//! |---|---|
+//! | Menu ([`Ui::menu_button`]) | A button that opens a menu, with submenus and icons; menu bars. |
+//! | Context menu ([`Response::context_menu`]) | A menu opened with a right click on a widget. |
+//! | Popup ([`Ui::popup_below`]) | Any content in a popup below a widget. |
 //!
 //! # Crates
 //!
@@ -210,10 +314,10 @@ pub use rustroke_text::{
 pub use rustroke_widgets::Image;
 pub use rustroke_widgets::{
     Align, AnimatedImage, AnimatedTexture, Automation, Button, CentralPanel, Checkbox,
-    CollapsingHeader, CollapsingResponse, ColorPicker, Column, ComboBox, Container, Context,
-    CursorIcon, Date, DatePicker, Direction, DockArea, DockNode, DockState, DockViewer, DragValue,
-    FocusLost, FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId,
-    Layout, LineHighlight, List, ListResponse, Margin, Modal, ModalResponse, Numeric, Order, Panel,
+    CollapsingHeader, CollapsingResponse, ColorPicker, Column, ComboBox, Context, CursorIcon, Date,
+    DatePicker, Direction, DockArea, DockNode, DockState, DockViewer, DragValue, FocusLost,
+    FrameOutput, Grid, Hyperlink, Icon, IconToggle, Id, InnerResponse, Label, LayerId, Layout,
+    LineHighlight, List, ListResponse, Margin, Modal, ModalResponse, Numeric, Order, Panel,
     PanelSide, ProgressBar, PropertyGrid, PropertyGridUi, RadioButton, ReferenceField,
     RepaintHandle, Response, ScrollArea, SearchField, SelectableLabel, Sense, Separator, Slider,
     SortOrder, Spinner, SplitAxis, Style, TabBar, TabBarResponse, TabLabel, Table, TableResponse,
@@ -222,8 +326,17 @@ pub use rustroke_widgets::{
     show_inspector, show_toasts,
 };
 pub use rustroke_widgets::{
-    Flex, FlexAlign, FlexDirection, FlexGrid, FlexItem, FlexJustify, FlexUi, GridCell, GridUi,
-    Track,
+    Axis, Bar, BarChart, Colormap, Corner, HLine, HeatMap, Line, LineStyle, MarkerShape, PieChart,
+    PieResponse, Plot, PlotBounds, PlotBuffer, PlotPoints, PlotResponse, PlotText, PlotUi, Points,
+    TickFormatter, Ticks, VLine,
+};
+pub use rustroke_widgets::{
+    Background, BoxStyle, GridCell, ImageFit, Justify, Sizing, Stack, StackAlign, StackDirection,
+    StackItem, Track,
+};
+#[allow(deprecated)]
+pub use rustroke_widgets::{
+    Container, Flex, FlexAlign, FlexDirection, FlexGrid, FlexItem, FlexJustify, FlexUi, GridUi,
 };
 #[cfg(feature = "markdown")]
 pub use rustroke_widgets::{ImageLoader, Markdown};

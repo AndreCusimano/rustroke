@@ -325,6 +325,18 @@ impl DisplayList {
         self.polyline(cubic_bezier_points(p, CURVE_TOLERANCE), stroke);
     }
 
+    /// Solid-colored triangles: `points` with one color each (or one for
+    /// all: the last color is reused), three `indices` per triangle. For
+    /// fills of any shape, heat maps and pie slices (see
+    /// [`Shape::Triangles`]).
+    pub fn triangles(&mut self, points: Vec<Point>, colors: Vec<Color>, indices: Vec<u32>) {
+        self.add(Shape::Triangles {
+            points,
+            colors,
+            indices,
+        });
+    }
+
     /// Triangles built by the app (see [`Mesh`]).
     pub fn mesh(&mut self, mesh: Arc<Mesh>) {
         self.add(Shape::Mesh(mesh));
@@ -514,6 +526,15 @@ fn transform_shape(shape: Shape, t: &Transform) -> Shape {
             }
             Shape::Mesh(mesh)
         }
+        Shape::Triangles {
+            points,
+            colors,
+            indices,
+        } => Shape::Triangles {
+            points: map(points),
+            colors,
+            indices,
+        },
         Shape::Gradient { shape, gradient } => Shape::Gradient {
             shape: Box::new(transform_shape(*shape, t)),
             gradient: gradient.transformed(t),

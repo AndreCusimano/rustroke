@@ -6,6 +6,55 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-10-11
+
+### Added
+
+- **`Stack`**: one container for rows, columns and items one over the
+  other (`Stack::overlay`, the first at the back). Items are aligned
+  across (`align`, `align_x`, `align_y`, including `Stretch`), spread
+  along (`justify`: start, center, end, space between/around/evenly),
+  wrapped, and given their own options with `Ui::stack_item(StackItem)`
+  (grow, shrink, basis, minimum and maximum size, alignment). The content
+  is a normal `Ui`: every widget added is an item.
+- **Box options** on `Stack` and `Grid` (also as a `BoxStyle` value):
+  background color, gradient (relative to the box) or image
+  (`ImageFit::Stretch`, `Contain`, `Cover`, `Center`, `Tile`, with a
+  tint), border, corner radius, shadow, padding, margin, width and height
+  (`Sizing::Content`, `Fill`, `Points`) with minimum and maximum, and
+  clipping.
+- `Grid` gains column tracks (`Grid::columns` with `Track::Points`,
+  `Fraction`, `Auto`), cells spanning columns and rows (`Ui::grid_span`),
+  explicit cells (`Ui::grid_cell`), cell alignment (`align_x`, `align_y`)
+  and the box options.
+- The `stack` example (replacing `flex`).
+- **Charts**: `Plot` with `Line` (solid, dashed or dotted, filled to a
+  baseline, markers, min/max marks), `Points` (six marker shapes),
+  `BarChart` (stacked, horizontal, `BarChart::histogram`), `HeatMap` (with
+  `Colormap`s), `HLine`/`VLine` and `PlotText`; `Axis` with title, range,
+  limits, ticks (auto, count, step), minor ticks, formatter, grid,
+  logarithmic and inverted scale; legend that hides series, crosshair and
+  nearest-value tooltip, drag to pan, scroll/pinch to zoom, right-drag to
+  zoom into a box, double-click to reset; `PlotBuffer` and
+  `Plot::follow_x` for live data; long series reduced to the extremes of
+  each pixel column. `PieChart` draws pie and donut charts. The `charts`
+  example shows them all.
+- `Shape::Triangles` / `DisplayList::triangles`: solid-colored triangles
+  (fills of any shape) that join without seams.
+- A component catalog in the guide and the README: every component in
+  one line, by category.
+
+### Deprecated
+
+- `Flex`, `FlexItem`, `FlexAlign`, `FlexJustify`, `FlexDirection`,
+  `FlexUi`, `FlexGrid`, `GridUi`: use `Stack` and `Grid`.
+- `Container`: use `Stack` (same options). `Window::frame` now takes a
+  `BoxStyle` (a `Container` still converts).
+
+### Changed
+
+- `Grid` is laid out with taffy, like the other layouts.
+
 ## [0.19.0] — 2026-10-11
 
 ### Added
@@ -658,7 +707,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/AndreCusimano/rustroke/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/AndreCusimano/rustroke/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/AndreCusimano/rustroke/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/AndreCusimano/rustroke/compare/v0.17.0...v0.17.1

@@ -1110,7 +1110,7 @@ macro_rules! impl_numeric {
 impl_numeric!(false => f32, f64);
 impl_numeric!(true => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 
-/// Drag a handle along a track to pick a number in a range. When focused,
+/// A handle dragged along a track to pick a number in a range. When focused,
 /// arrow keys change the value by one step and Home/End jump to the ends.
 #[derive(Debug)]
 pub struct Slider<'a, T: Numeric> {
