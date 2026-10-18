@@ -110,6 +110,8 @@ pub struct Frame<'a> {
     window_id: Option<Id>,
     /// [`Frame::close`] was called.
     close: bool,
+    /// [`Frame::focus_window`] was called: `None` means the main window.
+    focus: Option<Option<Id>>,
     /// Height of the title bar drawn over the content, in points.
     titlebar_height: f32,
     /// App values kept between runs (see [`Frame::set_value`]).
@@ -134,6 +136,20 @@ struct PlatformEvents {
     tray_clicked: bool,
 }
 
+/// What one redraw of a window produced for the runner.
+struct RedrawOutcome {
+    /// Extra windows to keep open.
+    windows: Vec<(Id, WindowOptions)>,
+    /// The frame handled input.
+    had_input: bool,
+    /// [`Frame::close`] was called.
+    close: bool,
+    /// Native menus and tray icon asked for.
+    platform: PlatformRequests,
+    /// [`Frame::focus_window`] was called.
+    focus: Option<Option<Id>>,
+}
+
 impl Frame<'_> {
     /// Keeps a second native window open (e.g. an assembly view on another
     /// monitor), from the main window's [`App::update`]: call it every frame
@@ -154,6 +170,15 @@ impl Frame<'_> {
     /// it opens again.
     pub fn close(&mut self) {
         self.close = true;
+    }
+
+    /// Brings a window to the front and gives it the keyboard focus:
+    /// `None` for the main window, `Some(id)` for one opened with
+    /// [`Frame::show_window`]. Call it from any window's frame; a window
+    /// that doesn't exist yet (or any more) is ignored. On Wayland the
+    /// platform may not allow stealing the focus.
+    pub fn focus_window(&mut self, id: Option<Id>) {
+        self.focus = Some(id);
     }
 
     /// Height of the title bar overlapping the top of the window, in
@@ -684,9 +709,7 @@ impl WindowState {
     }
 
     /// Runs one frame: `update` describes the UI, then it is drawn.
-    /// Returns the windows the frame asked for, whether it handled input
-    /// (which may have changed state other windows show) and whether the
-    /// app closed the window.
+    /// Runs one frame and returns what it asked the runner to do.
     fn redraw(
         &mut self,
         fonts: &mut Fonts,
@@ -695,7 +718,7 @@ impl WindowState {
         start: Instant,
         window_id: Option<Id>,
         update: impl FnOnce(&mut Frame<'_>),
-    ) -> (Vec<(Id, WindowOptions)>, bool, bool, PlatformRequests) {
+    ) -> RedrawOutcome {
         // Window scale factors are small values like 1.0, 1.5 or 2.0.
         #[allow(clippy::cast_possible_truncation)]
         let pixels_per_point = self.window.scale_factor() as f32 * self.ctx.zoom_factor();
@@ -719,7 +742,13 @@ impl WindowState {
         }
         let Some(renderer) = self.renderer.as_mut() else {
             // Not ready yet: a frame is requested when it is.
-            return (Vec::new(), false, false, PlatformRequests::default());
+            return RedrawOutcome {
+                windows: Vec::new(),
+                had_input: false,
+                close: false,
+                platform: PlatformRequests::default(),
+                focus: None,
+            };
         };
         let size = renderer.size();
         let screen_rect = Rect::from_min_max(
@@ -754,6 +783,7 @@ impl WindowState {
             windows: Vec::new(),
             window_id,
             close: false,
+            focus: None,
             titlebar_height: self.titlebar_height,
             storage,
             platform: PlatformRequests::default(),
@@ -769,6 +799,7 @@ impl WindowState {
             title,
             windows,
             close,
+            focus,
             platform,
             ..
         } = frame;
@@ -827,7 +858,13 @@ impl WindowState {
         if outcome == RenderOutcome::Retry || request_repaint || output.repaint {
             self.window.request_redraw();
         }
-        (windows, had_input, close, platform)
+        RedrawOutcome {
+            windows,
+            had_input,
+            close,
+            platform,
+            focus,
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -882,6 +919,7 @@ impl<A: App> Runner<A> {
             ..
         } = self;
         let had_input;
+        let focus;
         if let Some(main) = self.main.as_mut().filter(|m| m.window.id() == window) {
             #[cfg(all(
                 any(feature = "native-menu", feature = "tray"),
@@ -899,10 +937,14 @@ impl<A: App> Runner<A> {
                 any(target_os = "macos", target_os = "windows")
             )))]
             let events = PlatformEvents::default();
-            let (requested, input, close, platform) =
-                main.redraw(fonts, storage, events, *start, None, |frame| {
-                    app.update(frame)
-                });
+            let outcome = main.redraw(fonts, storage, events, *start, None, |frame| {
+                app.update(frame)
+            });
+            let requested = outcome.windows;
+            let input = outcome.had_input;
+            let close = outcome.close;
+            let platform = outcome.platform;
+            focus = outcome.focus;
             #[cfg(all(
                 any(feature = "native-menu", feature = "tray"),
                 any(target_os = "macos", target_os = "windows")
@@ -951,8 +993,7 @@ impl<A: App> Runner<A> {
             .find(|(_, s)| s.window.id() == window)
         {
             let id = *id;
-            let close;
-            (_, had_input, close, _) = state.redraw(
+            let outcome = state.redraw(
                 fonts,
                 storage,
                 PlatformEvents::default(),
@@ -962,6 +1003,9 @@ impl<A: App> Runner<A> {
                     app.update_window(id, frame);
                 },
             );
+            had_input = outcome.had_input;
+            focus = outcome.focus;
+            let close = outcome.close;
             if close {
                 self.extras.retain(|(k, _)| *k != id);
                 self.requested.retain(|(k, _)| *k != id);
@@ -972,6 +1016,19 @@ impl<A: App> Runner<A> {
             }
         } else {
             return;
+        }
+        if let Some(target) = focus {
+            let state = match target {
+                Some(id) => self
+                    .extras
+                    .iter()
+                    .find(|(key, _)| *key == id)
+                    .map(|(_, state)| state),
+                None => self.main.as_ref(),
+            };
+            if let Some(state) = state {
+                state.window.focus_window();
+            }
         }
         // Input in one window may change what the others show (shared app
         // state). Frames without input don't propagate, so this can't loop.

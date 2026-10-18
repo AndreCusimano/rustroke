@@ -76,9 +76,57 @@ impl Sense {
         focusable: false,
         activate_with_keys: false,
     };
+    /// Reachable with Tab and focused by a click, but Enter and Space are
+    /// left to the widget (they don't "click" it). Combine it with
+    /// [`Sense::CLICK`] or [`Sense::POINTER_DRAG`] with `|`, for an area
+    /// the app draws and handles by itself (a custom text box):
+    ///
+    /// ```no_run
+    /// # use rustroke_widgets::{Id, Sense, Ui};
+    /// # use rustroke_core::{Key, Modifiers, Rect, point, vec2};
+    /// # let ui: &mut Ui<'_> = todo!();
+    /// let response = ui.interact(
+    ///     Id::new("length"),
+    ///     Rect::from_min_size(point(0.0, 0.0), vec2(80.0, 24.0)),
+    ///     Sense::POINTER_DRAG | Sense::FOCUSABLE,
+    /// );
+    /// if response.has_focus() {
+    ///     ui.take_tab(response.id);
+    ///     if ui.input_mut().consume_key(Key::Tab, Modifiers::NONE) {
+    ///         // move between the app's fields
+    ///     }
+    /// }
+    /// ```
+    pub const FOCUSABLE: Self = Self {
+        click: false,
+        drag: false,
+        focusable: true,
+        activate_with_keys: false,
+    };
 
     fn interactive(self) -> bool {
         self.click || self.drag
+    }
+}
+
+impl std::ops::BitOr for Sense {
+    type Output = Self;
+
+    /// The union of both: e.g. [`Sense::POINTER_DRAG`] `|`
+    /// [`Sense::FOCUSABLE`].
+    fn bitor(self, rhs: Self) -> Self {
+        Self {
+            click: self.click || rhs.click,
+            drag: self.drag || rhs.drag,
+            focusable: self.focusable || rhs.focusable,
+            activate_with_keys: self.activate_with_keys || rhs.activate_with_keys,
+        }
+    }
+}
+
+impl std::ops::BitOrAssign for Sense {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
     }
 }
 
@@ -769,13 +817,20 @@ impl Context {
 
     /// Marks the focused widget `id` as taking keyboard input, so Escape
     /// is left to it and [`Context::wants_keyboard_input`] is true.
-    pub(crate) fn set_keyboard_owner(&mut self, id: Id) {
+    ///
+    /// For a widget the app draws and edits itself (see
+    /// [`Sense::FOCUSABLE`]), call it while the widget has focus.
+    pub fn set_keyboard_owner(&mut self, id: Id) {
         self.this_frame.keyboard_owner = Some(id);
     }
 
     /// The focused widget `id` handles Tab and Shift+Tab itself, so they
     /// don't move the focus next frame.
-    pub(crate) fn set_tab_owner(&mut self, id: Id) {
+    ///
+    /// Call it every frame for an app-drawn area that takes the keyboard
+    /// (see [`Sense::FOCUSABLE`]); it only has an effect while `id` also
+    /// has the focus.
+    pub fn set_tab_owner(&mut self, id: Id) {
         self.this_frame.tab_owner = Some(id);
     }
 

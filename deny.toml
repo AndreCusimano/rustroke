@@ -12,6 +12,12 @@ ignore = [
     # ttf-parser is unmaintained; it is only pulled in by winit's Wayland
     # client-side decorations (sctk-adwaita). Revisit when updating winit.
     "RUSTSEC-2026-0192",
+    # zbus_names, zvariant and zvariant_derive are unmaintained as standalone
+    # crates; they are only pulled in by AccessKit's Linux AT-SPI backend and
+    # there is no safe upgrade yet. Revisit when updating accesskit_winit.
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
 ]
 
 [licenses]

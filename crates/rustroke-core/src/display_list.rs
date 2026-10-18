@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    Color, Galley, Gradient, Mesh, Point, Rect, Shadow, Shape, Stroke, Transform, Vertex,
+    Color, FillRule, Galley, Gradient, Mesh, Point, Rect, Shadow, Shape, Stroke, Transform, Vertex,
     cubic_bezier_points, dashes, quadratic_bezier_points,
 };
 
@@ -217,6 +217,40 @@ impl DisplayList {
             closed: true,
             fill,
             stroke,
+        });
+    }
+
+    /// Fills one or more closed contours: concave outlines, holes and
+    /// self-intersections, according to `fill_rule`. The edges are
+    /// anti-aliased.
+    ///
+    /// ```
+    /// # use rustroke_core::{Color, DisplayList, FillRule, point};
+    /// let mut list = DisplayList::new();
+    /// let outer = vec![
+    ///     point(0.0, 0.0),
+    ///     point(40.0, 0.0),
+    ///     point(40.0, 40.0),
+    ///     point(0.0, 40.0),
+    /// ];
+    /// let hole = vec![
+    ///     point(10.0, 10.0),
+    ///     point(30.0, 10.0),
+    ///     point(30.0, 30.0),
+    ///     point(10.0, 30.0),
+    /// ];
+    /// list.path_filled(&[outer, hole], Color::WHITE, FillRule::EvenOdd);
+    /// ```
+    pub fn path_filled<C: AsRef<[Point]>>(
+        &mut self,
+        contours: &[C],
+        fill: Color,
+        fill_rule: FillRule,
+    ) {
+        self.add(Shape::FilledPath {
+            contours: contours.iter().map(|c| c.as_ref().to_vec()).collect(),
+            fill,
+            fill_rule,
         });
     }
 
@@ -478,6 +512,15 @@ fn transform_shape(shape: Shape, t: &Transform) -> Shape {
             fill,
             stroke: scale_stroke(stroke),
         },
+        Shape::FilledPath {
+            contours,
+            fill,
+            fill_rule,
+        } => Shape::FilledPath {
+            contours: contours.into_iter().map(&map).collect(),
+            fill,
+            fill_rule,
+        },
         Shape::Text { pos, galley, color } => Shape::TransformedText {
             galley,
             transform: Transform::translate(pos.to_vec2()).then(*t),
@@ -637,6 +680,22 @@ mod tests {
             })
             .collect();
         assert_eq!(alphas, [1.0, 0.5]);
+    }
+
+    #[test]
+    fn filled_paths_are_transformed() {
+        let mut list = DisplayList::new();
+        list.with_transform(Transform::translate(vec2(10.0, 20.0)), |list| {
+            list.path_filled(
+                &[vec![point(0.0, 0.0), point(10.0, 0.0), point(10.0, 10.0)]],
+                Color::WHITE,
+                FillRule::EvenOdd,
+            );
+        });
+        let Shape::FilledPath { contours, .. } = &list.shapes()[0].shape else {
+            panic!("still a filled path");
+        };
+        assert_eq!(contours[0][0], point(10.0, 20.0));
     }
 
     #[test]

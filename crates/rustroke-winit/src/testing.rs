@@ -62,6 +62,9 @@ pub struct Harness {
     window_contexts: Vec<(Id, Context)>,
     /// The last frame called [`Frame::close`].
     close_requested: bool,
+    /// The window the last frame asked to focus (`None`: no request,
+    /// `Some(None)`: the main window).
+    focus_requested: Option<Option<Id>>,
     /// App values (see [`Frame::set_value`]).
     storage: std::collections::BTreeMap<String, String>,
 }
@@ -142,6 +145,7 @@ impl Harness {
             windows: Vec::new(),
             window_contexts: Vec::new(),
             close_requested: false,
+            focus_requested: None,
             storage: std::collections::BTreeMap::new(),
         }
     }
@@ -191,6 +195,7 @@ impl Harness {
             windows: Vec::new(),
             window_id: None,
             close: false,
+            focus: None,
             titlebar_height: 0.0,
             storage: &mut self.storage,
             platform: Default::default(),
@@ -205,10 +210,12 @@ impl Harness {
             title,
             windows,
             close,
+            focus,
             ..
         } = frame;
         self.windows = windows;
         self.close_requested = close;
+        self.focus_requested = focus;
         self.clear_color = clear_color;
         if title.is_some() {
             self.title = title;
@@ -288,6 +295,17 @@ impl Harness {
     /// Runs one frame of extra window `id` ([`App::update_window`]), with
     /// that window's own context, and returns its widgets.
     pub fn run_window(&mut self, app: &mut impl App, id: Id) -> Vec<WidgetDescription> {
+        self.run_window_with_events(app, id, Vec::new())
+    }
+
+    /// Like [`Harness::run_window`], with input events (positions are in
+    /// that window's points).
+    pub fn run_window_with_events(
+        &mut self,
+        app: &mut impl App,
+        id: Id,
+        events: Vec<Event>,
+    ) -> Vec<WidgetDescription> {
         self.time += 1.0 / 60.0;
         let index = match self.window_contexts.iter().position(|(w, _)| *w == id) {
             Some(i) => i,
@@ -301,7 +319,7 @@ impl Harness {
             time: self.time,
             screen_rect: self.screen_rect,
             pixels_per_point: self.pixels_per_point,
-            events: Vec::new(),
+            events,
         });
         let mut frame = Frame {
             time: Duration::from_secs_f64(self.time),
@@ -317,6 +335,7 @@ impl Harness {
             windows: Vec::new(),
             window_id: Some(id),
             close: false,
+            focus: None,
             titlebar_height: 0.0,
             storage: &mut self.storage,
             platform: Default::default(),
@@ -326,6 +345,41 @@ impl Harness {
         self.fonts.end_frame();
         ctx.end_frame();
         ctx.widgets().to_vec()
+    }
+
+    /// The first widget labelled `label` in the last frame of extra window
+    /// `id`, like [`Harness::find`] for the main window.
+    pub fn find_in_window(&self, id: Id, label: &str) -> Option<&WidgetDescription> {
+        self.window_contexts
+            .iter()
+            .find(|(window, _)| *window == id)?
+            .1
+            .find_widget(label)
+    }
+
+    /// Clicks the center of the widget labelled `label` in extra window
+    /// `id` (as found in that window's last frame), then runs another
+    /// frame so the app reacts. Returns `false` if there is no such widget.
+    pub fn click_in_window(&mut self, app: &mut impl App, id: Id, label: &str) -> bool {
+        if self.find_in_window(id, label).is_none() {
+            self.run_window(app, id);
+        }
+        let Some(pos) = self.find_in_window(id, label).map(|w| w.rect.center()) else {
+            return false;
+        };
+        let event = |pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        self.run_window_with_events(
+            app,
+            id,
+            vec![Event::PointerMoved(pos), event(true), event(false)],
+        );
+        self.run_window(app, id);
+        true
     }
 
     /// The widgets of the last frame.
@@ -377,6 +431,13 @@ impl Harness {
     /// Whether the last frame of the main window called [`Frame::close`].
     pub fn close_requested(&self) -> bool {
         self.close_requested
+    }
+
+    /// The window the last frame asked to focus: `None` when it didn't
+    /// call [`Frame::focus_window`], `Some(None)` for the main window and
+    /// `Some(Some(id))` for an extra window.
+    pub fn focus_requested(&self) -> Option<Option<Id>> {
+        self.focus_requested
     }
 
     /// The window title set by the app, if any.
@@ -735,10 +796,27 @@ mod tests {
         let widgets = h.run_window(&mut app, id);
         assert!(widgets.iter().any(|w| w.info.label == "Explode"));
         assert!(h.find("Explode").is_none(), "not in the main window");
+        assert!(h.find_in_window(id, "Explode").is_some());
+        assert!(h.click_in_window(&mut app, id, "Explode"));
+        assert_eq!(app.clicks, 1, "a click in the extra window reaches the app");
 
         assert!(app.on_window_close_requested(id));
         h.run(&mut app);
         assert!(h.requested_windows().is_empty(), "closed for good");
+    }
+
+    /// WIN-08: the app asks the platform to bring a window to the front.
+    #[test]
+    fn focus_window_requests_are_reported() {
+        let mut h = Harness::new();
+        let mut app = |frame: &mut Frame| frame.focus_window(None);
+        h.run(&mut app);
+        assert_eq!(h.focus_requested(), Some(None), "the main window");
+
+        let id = Id::new("library");
+        let mut app = |frame: &mut Frame| frame.focus_window(Some(id));
+        h.run(&mut app);
+        assert_eq!(h.focus_requested(), Some(Some(id)), "an extra window");
     }
 
     #[test]

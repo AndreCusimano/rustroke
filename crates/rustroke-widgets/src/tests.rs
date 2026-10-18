@@ -1932,6 +1932,88 @@ fn request_focus_gives_a_text_field_focus() {
     assert_eq!(s, "x");
 }
 
+/// INP-10: an area the app draws can take the keyboard and keep Tab.
+#[test]
+fn app_drawn_area_takes_tab_enter_and_backspace() {
+    use crate::{Id, Sense};
+
+    #[derive(Default)]
+    struct State {
+        focus: bool,
+        tab: bool,
+        enter: bool,
+        backspace: bool,
+        button_clicked: bool,
+    }
+
+    fn run(h: &mut Harness, events: Vec<Event>, s: &mut State) {
+        let id = Id::new("app area");
+        let rect = Rect::from_min_size(point(20.0, 80.0), vec2(160.0, 40.0));
+        h.frame(events, |ui| {
+            if ui.button("Other").clicked() {
+                s.button_clicked = true;
+            }
+            let r = ui.interact(id, rect, Sense::POINTER_DRAG | Sense::FOCUSABLE);
+            if r.has_focus() {
+                s.focus = true;
+                ui.take_tab(r.id);
+                ui.take_keyboard(r.id);
+                s.tab |= ui.input_mut().consume_key(Key::Tab, Modifiers::NONE);
+                s.enter |= ui.input_mut().consume_key(Key::Enter, Modifiers::NONE);
+                s.backspace |= ui.input_mut().consume_key(Key::Backspace, Modifiers::NONE);
+            }
+        });
+    }
+
+    let mut h = Harness::new();
+    let mut s = State::default();
+    run(&mut h, vec![], &mut s);
+    let center = point(100.0, 100.0);
+    run(
+        &mut h,
+        vec![button(center, true), button(center, false)],
+        &mut s,
+    );
+    run(&mut h, vec![], &mut s);
+    assert!(s.focus, "the area takes focus on a click");
+
+    let focused = h.ctx.focused();
+    run(&mut h, vec![key(Key::Tab, Modifiers::NONE)], &mut s);
+    assert_eq!(h.ctx.focused(), focused, "Tab stays on the app area");
+    assert!(s.tab, "the app sees Tab");
+
+    run(&mut h, vec![key(Key::Enter, Modifiers::NONE)], &mut s);
+    assert!(s.enter, "the app sees Enter");
+    assert!(!s.button_clicked, "Enter doesn't press another widget");
+
+    run(&mut h, vec![key(Key::Backspace, Modifiers::NONE)], &mut s);
+    assert!(s.backspace, "the app sees Backspace");
+}
+
+#[test]
+fn response_request_focus_focuses_an_app_area_next_frame() {
+    use crate::{Id, Sense};
+    let mut h = Harness::new();
+    let id = Id::new("app area");
+    let rect = Rect::from_min_size(point(10.0, 10.0), vec2(100.0, 30.0));
+    let mut requested = false;
+    let mut has_focus = false;
+    h.frame(vec![], |ui| {
+        let r = ui.interact(id, rect, Sense::POINTER_DRAG | Sense::FOCUSABLE);
+        if !requested {
+            r.request_focus(ui);
+            requested = true;
+        }
+        has_focus = r.has_focus();
+    });
+    assert!(!has_focus, "focus takes effect in the next frame");
+    h.frame(vec![], |ui| {
+        let r = ui.interact(id, rect, Sense::POINTER_DRAG | Sense::FOCUSABLE);
+        has_focus = r.has_focus();
+    });
+    assert!(has_focus);
+}
+
 /// INP-04: menu items show their shortcut; the app handles the keys.
 #[test]
 fn menu_items_show_shortcut_text() {
@@ -2728,6 +2810,59 @@ fn modal_can_close_on_a_click_outside() {
     let corner = point(5.0, 5.0);
     frame(&mut h, vec![button(corner, true)]);
     assert!(frame(&mut h, vec![button(corner, false)]));
+}
+
+fn placed_modal_frame(
+    h: &mut Harness,
+    events: Vec<Event>,
+    pos: Option<Point>,
+    movable: bool,
+) -> Rect {
+    let mut rect = Rect::NOTHING;
+    h.frame_with(events, |h| {
+        let mut modal = crate::Modal::new("placed")
+            .title("Move")
+            .width(200.0)
+            .movable(movable);
+        if let Some(pos) = pos {
+            modal = modal.position(pos);
+        }
+        rect = modal
+            .show(h, |ui| {
+                ui.button("OK");
+            })
+            .response
+            .rect;
+    });
+    rect
+}
+
+#[test]
+fn modal_can_be_placed_and_moved() {
+    let mut h = Harness::new();
+    let start = point(40.0, 30.0);
+    placed_modal_frame(&mut h, vec![], Some(start), true);
+    let card = placed_modal_frame(&mut h, vec![], Some(start), true);
+    assert!(
+        (card.min - start).length() < 0.5,
+        "placed at {start:?}: {card:?}"
+    );
+
+    let grip = card.min + vec2(20.0, 10.0);
+    let delta = vec2(50.0, 20.0);
+    placed_modal_frame(
+        &mut h,
+        vec![move_to(grip), button(grip, true)],
+        Some(start),
+        true,
+    );
+    placed_modal_frame(&mut h, vec![move_to(grip + delta)], Some(start), true);
+    let moved = placed_modal_frame(&mut h, vec![button(grip + delta, false)], Some(start), true);
+    assert!(
+        (moved.min - (start + delta)).length() < 0.5,
+        "dragged to {:?}: {moved:?}",
+        start + delta
+    );
 }
 
 /// The rectangle shape drawn exactly at `rect`, if any.
@@ -4596,6 +4731,38 @@ fn growing_field_fills_only_its_share() {
     });
     assert!(rects[1].max.x < rects[2].min.x, "{rects:?}");
     assert!((rects[2].max.x - 394.0).abs() < 0.5, "{rects:?}");
+}
+
+#[test]
+fn stack_items_limit_fill_widgets_to_their_slot() {
+    use crate::{ProgressBar, Stack, StackItem};
+    let mut h = Harness::new();
+    let mut widths = Vec::new();
+    settle(&mut h, |ui| {
+        widths.clear();
+        Stack::row().fill_width().show(ui, |ui| {
+            ui.stack_item(
+                StackItem::new().max_size(vec2(100.0, f32::INFINITY)),
+                |ui| {
+                    widths.push(ui.available_width());
+                    ui.add(ProgressBar::new(0.5));
+                },
+            );
+            ui.stack_item(StackItem::new().grow(1.0).basis(0.0), |ui| {
+                widths.push(ui.available_width());
+                ui.add(ProgressBar::new(0.5));
+            });
+        });
+    });
+    assert_eq!(widths.len(), 2);
+    assert!(
+        (widths[0] - 100.0).abs() < 0.5,
+        "a fill-width widget stays inside its item: {widths:?}"
+    );
+    assert!(
+        widths[1] < 300.0,
+        "the second item takes the rest of the row: {widths:?}"
+    );
 }
 
 #[test]

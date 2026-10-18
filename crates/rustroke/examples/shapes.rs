@@ -6,7 +6,7 @@
 
 use std::f32::consts::TAU;
 
-use rustroke::{App, Color, Frame, Rect, Stroke, WindowOptions, point, vec2};
+use rustroke::{App, Color, FillRule, Frame, Rect, Stroke, WindowOptions, point, vec2};
 
 struct Shapes;
 
@@ -42,7 +42,7 @@ impl App for Shapes {
                 card_size,
             )
         };
-        for i in 0..6 {
+        for i in 0..7 {
             s.rect(
                 card(i),
                 12.0,
@@ -125,6 +125,23 @@ impl App for Shapes {
                 s.rect_filled(r, 11.0, [blue, green, red][i % 3]);
             }
         });
+
+        // 7. A concave star with a hole (fill rules, anti-aliased edges).
+        let c = card(6);
+        let star = (0..10)
+            .map(|i| {
+                let radius = if i % 2 == 0 { 58.0 } else { 24.0 };
+                let angle = -TAU / 4.0 + i as f32 * TAU / 10.0 + t * 0.3;
+                c.center() + vec2(angle.cos(), angle.sin()) * radius
+            })
+            .collect();
+        let hole = vec![
+            c.center() + vec2(-12.0, -12.0),
+            c.center() + vec2(12.0, -12.0),
+            c.center() + vec2(12.0, 12.0),
+            c.center() + vec2(-12.0, 12.0),
+        ];
+        s.path_filled(&[star, hole], green.with_alpha(0.9), FillRule::EvenOdd);
     }
 }
 
@@ -133,7 +150,7 @@ fn main() -> Result<(), rustroke::RunError> {
     rustroke::run(
         WindowOptions {
             title: "shapes".to_owned(),
-            inner_size: (950.0, 400.0),
+            inner_size: (950.0, 570.0),
             ..Default::default()
         },
         Shapes,

@@ -28,6 +28,7 @@ impl App for Demo {
                 },
             );
         }
+        let mut focus = None;
         frame.ui(|ui| {
             ui.heading("Main window");
             ui.checkbox(&mut self.show_assembly, "Show the assembly window");
@@ -35,7 +36,13 @@ impl App for Demo {
             if ui.button("Add part").clicked() {
                 self.parts += 1;
             }
+            if self.show_assembly && ui.button("Focus the assembly window").clicked() {
+                focus = Some(Some(Id::new(ASSEMBLY)));
+            }
         });
+        if let Some(id) = focus {
+            frame.focus_window(id);
+        }
     }
 
     fn update_window(&mut self, id: Id, frame: &mut Frame) {
@@ -43,6 +50,7 @@ impl App for Demo {
             return;
         }
         frame.clear_color = frame.ctx().style().visuals.background;
+        let mut focus_main = false;
         frame.ui(|ui| {
             ui.heading("Assembly");
             ui.label(format!(
@@ -52,7 +60,11 @@ impl App for Demo {
             ));
             // Changes here are seen by the main window too.
             ui.add(Slider::new(&mut self.explode, 0.0..=1.0).text("Explode"));
+            focus_main = ui.button("Focus the main window").clicked();
         });
+        if focus_main {
+            frame.focus_window(None);
+        }
     }
 
     fn on_window_close_requested(&mut self, _id: Id) -> bool {

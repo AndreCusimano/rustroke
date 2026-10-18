@@ -10,7 +10,8 @@
 use std::path::PathBuf;
 
 use rustroke_core::{
-    Color, DisplayList, PhysicalSize, Rect, Stroke, Tessellator, TextureAtlas, point, vec2,
+    Color, DisplayList, FillRule, PhysicalSize, Rect, Stroke, Tessellator, TextureAtlas, point,
+    vec2,
 };
 use rustroke_render::{OffscreenRenderer, PaintJob, wgpu};
 use rustroke_text::{Fonts, TextStyle};
@@ -83,6 +84,22 @@ fn shapes_scene() -> DisplayList {
     list.with_clip(clip, |list| {
         list.circle_filled(point(245.0, 70.0), 45.0, red)
     });
+    // A concave path with a hole (even-odd).
+    let outer = vec![
+        point(198.0, 118.0),
+        point(248.0, 118.0),
+        point(248.0, 152.0),
+        point(228.0, 152.0),
+        point(228.0, 138.0),
+        point(198.0, 138.0),
+    ];
+    let hole = vec![
+        point(206.0, 124.0),
+        point(220.0, 124.0),
+        point(220.0, 132.0),
+        point(206.0, 132.0),
+    ];
+    list.path_filled(&[outer, hole], blue.with_alpha(0.85), FillRule::EvenOdd);
     list
 }
 

@@ -24,6 +24,6 @@ pub use input::{
 pub use paint::{
     Gradient, GradientKind, Shadow, Transform, cubic_bezier_points, dashes, quadratic_bezier_points,
 };
-pub use shape::{PaintCallback, Shape, Stroke};
+pub use shape::{FillRule, PaintCallback, Shape, Stroke};
 pub use tessellator::{ClippedMesh, Mesh, Tessellator, Vertex};
 pub use texture::{ColorImage, TextureId, TexturesDelta};

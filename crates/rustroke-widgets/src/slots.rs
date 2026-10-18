@@ -177,8 +177,13 @@ impl Slots {
     }
 
     /// Whether last frame's layout has a place for the next item.
-    fn known(&self) -> bool {
+    pub(crate) fn known(&self) -> bool {
         self.rects.get(self.items.len()).is_some()
+    }
+
+    /// The place last frame's layout assigned to the next item.
+    pub(crate) fn slot_rect(&self) -> Rect {
+        self.slot()
     }
 
     /// The area of the next item.

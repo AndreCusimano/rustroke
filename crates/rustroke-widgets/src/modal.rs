@@ -3,11 +3,18 @@
 
 use std::hash::Hash;
 
-use rustroke_core::{Key, Modifiers, Rect, Vec2, point, vec2};
+use rustroke_core::{Key, Modifiers, Point, Rect, Vec2, point, vec2};
 
 use crate::containers::paint_floating_frame;
 use crate::context::Order;
-use crate::{Align, Id, Label, LayerId, Layout, Response, Sense, Ui, UiRoot};
+use crate::{Align, CursorIcon, Id, Label, LayerId, Layout, Response, Sense, Ui, UiRoot};
+
+/// Where a movable dialog was left, kept between frames.
+#[derive(Clone, Copy, Debug)]
+struct ModalPos {
+    pos: Point,
+    dragged: bool,
+}
 
 /// What [`Modal::show`] returns.
 #[derive(Clone, Debug)]
@@ -61,6 +68,8 @@ pub struct Modal {
     title: Option<String>,
     width: f32,
     close_on_click_outside: bool,
+    position: Option<Point>,
+    movable: bool,
 }
 
 impl Modal {
@@ -71,6 +80,8 @@ impl Modal {
             title: None,
             width: 360.0,
             close_on_click_outside: false,
+            position: None,
+            movable: false,
         }
     }
 
@@ -93,6 +104,21 @@ impl Modal {
         self
     }
 
+    /// Where the dialog starts (its top-left corner in window points).
+    /// Without it the dialog is centered. Once the user has dragged a
+    /// movable dialog, its dragged position wins.
+    pub fn position(mut self, pos: Point) -> Self {
+        self.position = Some(pos);
+        self
+    }
+
+    /// Lets the user move the dialog by dragging its title bar (or its top
+    /// strip when it has no title). Default `false`.
+    pub fn movable(mut self, movable: bool) -> Self {
+        self.movable = movable;
+        self
+    }
+
     /// Shows the dialog with its content for this frame.
     pub fn show<R>(
         self,
@@ -112,11 +138,28 @@ impl Modal {
         let measured: Option<Vec2> = ctx.data(self.id);
         let width = self.width.min(screen.width() - 2.0 * pad).max(0.0);
         let height = measured.map_or(0.0, |m| m.y + 2.0 * pad);
-        let card = Rect::from_center_size(screen.center(), vec2(width, height));
-        let card = Rect::from_min_size(
-            point(card.min.x, card.min.y.max(screen.min.y + pad)),
-            card.size(),
+        let centered = point(
+            screen.center().x - width / 2.0,
+            screen.center().y - height / 2.0,
         );
+        let pos_key = self.id.with("position");
+        let saved: Option<ModalPos> = ctx.data(pos_key);
+        let mut pos = saved.map_or_else(|| self.position.unwrap_or(centered), |s| s.pos);
+        let clamp = |pos: &mut Point| {
+            let max_x = (screen.max.x - width).max(screen.min.x);
+            let max_y = (screen.max.y - height).max(screen.min.y);
+            pos.x = pos.x.clamp(screen.min.x, max_x);
+            pos.y = pos.y.clamp(screen.min.y, max_y);
+        };
+        clamp(&mut pos);
+        let card = Rect::from_min_size(pos, vec2(width, height));
+        let title_height = style.spacing.interact_height;
+        let drag_height = if self.title.is_some() {
+            pad + title_height
+        } else {
+            title_height
+        };
+        let mut dragged = saved.is_some_and(|s| s.dragged);
 
         let mut should_close = false;
         let (inner, content) = ctx.ui_in_layer(layer, self.id, screen, fonts, |ui| {
@@ -125,6 +168,17 @@ impl Modal {
             ui.painter()
                 .rect_filled(screen, 0.0, visuals.modal_backdrop);
             let _ = ui.interact(self.id.with("card"), card, Sense::POINTER_DRAG);
+            if self.movable {
+                let drag_rect = Rect::from_min_size(card.min, vec2(card.width(), drag_height));
+                let drag = ui.interact(self.id.with("drag"), drag_rect, Sense::POINTER_DRAG);
+                if drag.dragged() {
+                    pos += drag.drag_delta();
+                    dragged = true;
+                    ui.ctx().set_cursor(CursorIcon::Grabbing);
+                } else if drag.hovered() {
+                    ui.ctx().set_cursor(CursorIcon::Grab);
+                }
+            }
             paint_floating_frame(ui.painter(), card, visuals);
 
             let content_max = Rect::from_min_max(
@@ -155,6 +209,10 @@ impl Modal {
             should_close = true;
         }
 
+        if dragged {
+            clamp(&mut pos);
+            ctx.insert_data(pos_key, ModalPos { pos, dragged: true });
+        }
         let size = content.rect.size();
         if measured != Some(size) {
             ctx.insert_data(self.id, size);

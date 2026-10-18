@@ -7,8 +7,8 @@
 use std::f32::consts::TAU;
 
 use crate::{
-    ClippedShape, Color, DisplayList, Galley, Gradient, GradientKind, PaintCallback, Point, Rect,
-    Shadow, Shape, Stroke, TextureAtlas, TextureId, Vec2,
+    ClippedShape, Color, DisplayList, FillRule, Galley, Gradient, GradientKind, PaintCallback,
+    Point, Rect, Shadow, Shape, Stroke, TextureAtlas, TextureId, Vec2,
 };
 
 /// One vertex of a [`Mesh`].
@@ -196,6 +196,11 @@ impl Tessellator {
                 self.path.extend_from_slice(points);
                 self.fill_and_stroke(*closed, *fill, *stroke, mesh);
             }
+            Shape::FilledPath {
+                contours,
+                fill,
+                fill_rule,
+            } => self.add_filled_path(contours, *fill, *fill_rule, mesh),
             Shape::Text { pos, galley, color } => self.add_text(*pos, galley, *color, mesh),
             Shape::TransformedText {
                 galley,
@@ -477,6 +482,152 @@ impl Tessellator {
         }
     }
 
+    /// Fills any number of closed contours (concave, with holes or
+    /// self-intersections) with `fill_rule`, then feathers the edges on
+    /// their empty side.
+    fn add_filled_path(
+        &mut self,
+        contours: &[Vec<Point>],
+        fill: Color,
+        fill_rule: FillRule,
+        mesh: &mut Mesh,
+    ) {
+        if fill.a <= 0.0 || contours.is_empty() {
+            return;
+        }
+        let edges = fill_edges(contours);
+        if edges.is_empty() {
+            return;
+        }
+        let mut ys: Vec<f32> = contours.iter().flatten().map(|p| p.y).collect();
+        // A band must not contain a crossing: split it there, or the
+        // spans on either side of the crossing would be wrong.
+        ys.extend(edge_crossings(&edges));
+        ys.sort_by(f32::total_cmp);
+        ys.dedup();
+        let color = premultiplied(fill);
+
+        // Fill horizontal bands between consecutive vertex heights. The
+        // edges crossing a band's middle are the same for the whole band,
+        // so every span becomes one trapezoid.
+        for band in ys.windows(2) {
+            let (y0, y1) = (band[0], band[1]);
+            if y1 <= y0 {
+                continue;
+            }
+            let middle = (y0 + y1) * 0.5;
+            let mut hits: Vec<(f32, usize)> = edges
+                .iter()
+                .enumerate()
+                .filter(|(_, edge)| edge.min_y() < middle && middle < edge.max_y())
+                .map(|(i, edge)| (edge.x_at(middle), i))
+                .collect();
+            if hits.len() < 2 {
+                continue;
+            }
+            hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+            let mut spans = Vec::new();
+            match fill_rule {
+                FillRule::EvenOdd => {
+                    for pair in hits.as_chunks::<2>().0 {
+                        spans.push((pair[0].1, pair[1].1));
+                    }
+                }
+                FillRule::NonZero => {
+                    let mut winding = 0;
+                    let mut left = None;
+                    for &(_, edge) in &hits {
+                        let was_inside = winding != 0;
+                        winding += edges[edge].winding;
+                        let inside = winding != 0;
+                        if !was_inside && inside {
+                            left = Some(edge);
+                        } else if was_inside
+                            && !inside
+                            && let Some(left) = left.take()
+                        {
+                            spans.push((left, edge));
+                        }
+                    }
+                }
+            }
+
+            for (left, right) in spans {
+                let (left, right) = (&edges[left], &edges[right]);
+                let (xl0, xl1) = (left.x_at(y0), left.x_at(y1));
+                let (xr0, xr1) = (right.x_at(y0), right.x_at(y1));
+                if (xr0 - xl0).abs() < 1e-6 && (xr1 - xl1).abs() < 1e-6 {
+                    continue;
+                }
+                let first = mesh.next_index();
+                self.push_vertex(mesh, Point::new(xl0, y0), color);
+                self.push_vertex(mesh, Point::new(xr0, y0), color);
+                self.push_vertex(mesh, Point::new(xr1, y1), color);
+                self.push_vertex(mesh, Point::new(xl1, y1), color);
+                mesh.quad(first, first + 1, first + 2, first + 3);
+            }
+        }
+
+        // Feather each contour on its empty side: a one-pixel strip from
+        // the outline (fill color) to transparent. Which side is empty
+        // depends on the contour being an outline or a hole, so sample
+        // both sides with the fill rule.
+        let feather = self.feather;
+        let epsilon = (feather * 0.1).max(1e-4);
+        for contour in contours {
+            self.path.clear();
+            self.path.extend_from_slice(contour);
+            dedup_points(&mut self.path, feather * 0.01);
+            if self.path.len() < 3 {
+                continue;
+            }
+            compute_normals(&self.path, true, &mut self.normals);
+            let n = self.path.len();
+            let mut best = 0;
+            let mut best_len = 0.0;
+            for i in 0..n {
+                let len = self.path[i].distance(self.path[(i + 1) % n]);
+                if len > best_len {
+                    best_len = len;
+                    best = i;
+                }
+            }
+            if best_len <= feather * 0.01 {
+                continue;
+            }
+            let a = self.path[best];
+            let b = self.path[(best + 1) % n];
+            let direction = (b - a).normalized();
+            let across = Vec2::new(direction.y, -direction.x);
+            let middle = a + (b - a) * 0.5;
+            let plus = point_inside(contours, fill_rule, middle + across * epsilon);
+            let minus = point_inside(contours, fill_rule, middle - across * epsilon);
+            let side = if plus && !minus {
+                -1.0
+            } else if minus && !plus {
+                1.0
+            } else {
+                continue; // not a boundary (or too close to another one)
+            };
+
+            let first = mesh.next_index();
+            for i in 0..n {
+                let p = self.path[i];
+                self.push_vertex(mesh, p, color);
+                self.push_vertex(mesh, p + self.normals[i] * (side * feather), TRANSPARENT);
+            }
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let inner = first + i as u32 * 2;
+                let outer = inner + 1;
+                let next_inner = first + j as u32 * 2;
+                let next_outer = next_inner + 1;
+                mesh.quad(inner, next_inner, next_outer, outer);
+            }
+        }
+    }
+
     fn fill_and_stroke(&mut self, closed: bool, fill: Color, stroke: Stroke, mesh: &mut Mesh) {
         dedup_points(&mut self.path, self.feather * 0.01);
         if self.path.len() < 2 {
@@ -687,6 +838,148 @@ impl Tessellator {
 
 fn premultiplied(c: Color) -> [f32; 4] {
     [c.r * c.a, c.g * c.a, c.b * c.a, c.a]
+}
+
+/// One non-horizontal edge of a contour being filled.
+struct FillEdge {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    /// +1 when the edge runs down the screen, -1 when it runs up.
+    winding: i32,
+}
+
+impl FillEdge {
+    fn min_y(&self) -> f32 {
+        self.y0.min(self.y1)
+    }
+
+    fn max_y(&self) -> f32 {
+        self.y0.max(self.y1)
+    }
+
+    fn x_at(&self, y: f32) -> f32 {
+        let y = y.clamp(self.min_y(), self.max_y());
+        self.x0 + (self.x1 - self.x0) * (y - self.y0) / (self.y1 - self.y0)
+    }
+}
+
+/// The non-horizontal edges of every contour, closed from the last point
+/// back to the first.
+fn fill_edges(contours: &[Vec<Point>]) -> Vec<FillEdge> {
+    let mut edges = Vec::new();
+    for contour in contours {
+        if contour.len() < 3 {
+            continue;
+        }
+        for i in 0..contour.len() {
+            let a = contour[i];
+            let b = contour[(i + 1) % contour.len()];
+            if a.y == b.y {
+                continue; // horizontal edges never cross a band's middle
+            }
+            edges.push(FillEdge {
+                x0: a.x,
+                y0: a.y,
+                x1: b.x,
+                y1: b.y,
+                winding: if b.y > a.y { 1 } else { -1 },
+            });
+        }
+    }
+    edges
+}
+
+/// Heights at which two edges cross, so self-intersecting contours are
+/// split into bands with a stable set of spans. Simple contours (the
+/// usual case) have none.
+fn edge_crossings(edges: &[FillEdge]) -> Vec<f32> {
+    // Sweep in y: each edge is compared only with edges still active
+    // (their y range contains its start). Simple contours, whose edges
+    // don't overlap much in y, stay close to linear.
+    let mut order: Vec<usize> = (0..edges.len()).collect();
+    order.sort_by(|&a, &b| edges[a].min_y().total_cmp(&edges[b].min_y()));
+    let mut active: Vec<usize> = Vec::new();
+    let mut ys = Vec::new();
+    for &i in &order {
+        let start = edges[i].min_y();
+        active.retain(|&j| edges[j].max_y() > start);
+        for &j in &active {
+            if let Some(y) = crossing_y(&edges[i], &edges[j]) {
+                ys.push(y);
+            }
+        }
+        active.push(i);
+    }
+    ys
+}
+
+/// The height where segments `a` and `b` cross, if they cross inside both.
+fn crossing_y(a: &FillEdge, b: &FillEdge) -> Option<f32> {
+    if a.max_y() <= b.min_y()
+        || b.max_y() <= a.min_y()
+        || a.x0.max(a.x1) < b.x0.min(b.x1)
+        || b.x0.max(b.x1) < a.x0.min(a.x1)
+    {
+        return None;
+    }
+    let d1 = Vec2::new(a.x1 - a.x0, a.y1 - a.y0);
+    let d2 = Vec2::new(b.x1 - b.x0, b.y1 - b.y0);
+    let denominator = d1.x * d2.y - d1.y * d2.x;
+    if denominator.abs() < 1e-9 {
+        return None;
+    }
+    let rx = b.x0 - a.x0;
+    let ry = b.y0 - a.y0;
+    let t = (rx * d2.y - ry * d2.x) / denominator;
+    let u = (rx * d1.y - ry * d1.x) / denominator;
+    if (0.0..1.0).contains(&t) && (0.0..1.0).contains(&u) {
+        Some(a.y0 + t * d1.y)
+    } else {
+        None
+    }
+}
+
+/// Whether `p` is inside the contours according to `rule`.
+fn point_inside(contours: &[Vec<Point>], rule: FillRule, p: Point) -> bool {
+    match rule {
+        FillRule::EvenOdd => {
+            let mut inside = false;
+            for contour in contours {
+                for i in 0..contour.len() {
+                    let a = contour[i];
+                    let b = contour[(i + 1) % contour.len()];
+                    if (a.y > p.y) != (b.y > p.y) {
+                        let x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
+                        if x > p.x {
+                            inside = !inside;
+                        }
+                    }
+                }
+            }
+            inside
+        }
+        FillRule::NonZero => {
+            let mut winding = 0;
+            for contour in contours {
+                for i in 0..contour.len() {
+                    let a = contour[i];
+                    let b = contour[(i + 1) % contour.len()];
+                    // Positive when `p` is to the left of a -> b.
+                    let side = (b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y);
+                    if a.y <= p.y {
+                        if b.y > p.y && side > 0.0 {
+                            winding += 1;
+                        }
+                    } else if b.y <= p.y && side < 0.0 {
+                        winding -= 1;
+                    }
+                }
+            }
+            winding != 0
+        }
+    }
 }
 
 /// Removes consecutive (and, for closed paths, first/last) points closer
@@ -910,6 +1203,102 @@ mod tests {
             (a - 100.0).abs() < 0.5 && (b - 100.0).abs() < 0.5,
             "{a} vs {b}"
         );
+    }
+
+    fn square(x: f32, y: f32, size: f32) -> Vec<Point> {
+        vec![
+            point(x, y),
+            point(x + size, y),
+            point(x + size, y + size),
+            point(x, y + size),
+        ]
+    }
+
+    fn filled(contours: Vec<Vec<Point>>, rule: FillRule, ppp: f32) -> f32 {
+        coverage(&tessellate(
+            Shape::FilledPath {
+                contours,
+                fill: Color::WHITE,
+                fill_rule: rule,
+            },
+            ppp,
+        ))
+    }
+
+    #[test]
+    fn filled_path_covers_concave_outlines() {
+        let l_shape = vec![
+            point(0.0, 0.0),
+            point(100.0, 0.0),
+            point(100.0, 40.0),
+            point(40.0, 40.0),
+            point(40.0, 100.0),
+            point(0.0, 100.0),
+        ];
+        for ppp in [1.0, 2.0] {
+            let area = filled(vec![l_shape.clone()], FillRule::EvenOdd, ppp);
+            let feather = 1.0 / ppp;
+            let expected = 6400.0 + 0.5 * 400.0 * feather;
+            assert!(
+                (area - expected).abs() / expected < 0.03,
+                "ppp {ppp}: {area} vs {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn filled_path_cuts_holes_by_fill_rule() {
+        let outer = square(0.0, 0.0, 100.0);
+        let hole = square(30.0, 30.0, 40.0);
+        let even_odd = filled(vec![outer.clone(), hole.clone()], FillRule::EvenOdd, 1.0);
+        let expected = 8400.0 + 0.5 * (400.0 + 160.0);
+        assert!(
+            (even_odd - expected).abs() / expected < 0.03,
+            "even-odd: {even_odd} vs {expected}"
+        );
+
+        let mut reversed = hole.clone();
+        reversed.reverse();
+        let non_zero = filled(vec![outer.clone(), reversed], FillRule::NonZero, 1.0);
+        assert!(
+            (non_zero - expected).abs() / expected < 0.03,
+            "non-zero hole: {non_zero} vs {expected}"
+        );
+
+        // Wound the same way, the inner contour is not a hole under
+        // non-zero: the square stays filled.
+        let same = filled(vec![outer, hole], FillRule::NonZero, 1.0);
+        let expected_same = 10000.0 + 0.5 * 400.0;
+        assert!(
+            (same - expected_same).abs() / expected_same < 0.03,
+            "non-zero same winding: {same} vs {expected_same}"
+        );
+    }
+
+    #[test]
+    fn filled_path_fills_disjoint_contours() {
+        let area = filled(
+            vec![square(0.0, 0.0, 50.0), square(100.0, 0.0, 50.0)],
+            FillRule::EvenOdd,
+            1.0,
+        );
+        let expected = 5000.0 + 0.5 * 400.0;
+        assert!(
+            (area - expected).abs() / expected < 0.03,
+            "{area} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn filled_path_handles_self_intersections() {
+        let bow_tie = vec![
+            point(0.0, 0.0),
+            point(100.0, 100.0),
+            point(100.0, 0.0),
+            point(0.0, 100.0),
+        ];
+        let area = filled(vec![bow_tie], FillRule::EvenOdd, 1.0);
+        assert!((area - 5000.0).abs() < 1000.0, "{area}");
     }
 
     #[test]

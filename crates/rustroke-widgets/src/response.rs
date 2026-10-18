@@ -1,6 +1,6 @@
 use rustroke_core::{Point, PointerButton, Rect, Vec2};
 
-use crate::Id;
+use crate::{Id, Ui};
 
 /// Why a widget (usually a text field) gave up keyboard focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -187,5 +187,12 @@ impl Response {
     /// be drawn (clicking gives focus without showing the ring).
     pub fn focus_visible(&self) -> bool {
         self.has_focus && self.focus_visible
+    }
+
+    /// Gives keyboard focus to this widget, e.g. a custom area the app
+    /// draws (see [`crate::Sense::FOCUSABLE`]). Takes effect this frame
+    /// for widgets added after the call, otherwise in the next one.
+    pub fn request_focus(&self, ui: &mut Ui<'_>) {
+        ui.request_focus(self.id);
     }
 }

@@ -158,11 +158,14 @@ impl App for Demo {
 
         // A modal dialog: everything else is blocked until it is answered.
         if self.confirm_quit {
-            let dialog = Modal::new("quit").title("Quit?").show(frame, |ui| {
-                ui.label("Unsaved screens will be lost.");
-                ui.horizontal(|ui| (ui.button("Quit").clicked(), ui.button("Cancel").clicked()))
-                    .inner
-            });
+            let dialog = Modal::new("quit")
+                .title("Quit?")
+                .movable(true)
+                .show(frame, |ui| {
+                    ui.label("Unsaved screens will be lost.");
+                    ui.horizontal(|ui| (ui.button("Quit").clicked(), ui.button("Cancel").clicked()))
+                        .inner
+                });
             let (quit, cancel) = dialog.inner;
             if quit {
                 frame.close();

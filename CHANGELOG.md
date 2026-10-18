@@ -4,7 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.21.0] — 2026-10-18
+
+### Added
+
+- `DisplayList::path_filled` and `Shape::FilledPath`: fill any number of
+  closed contours, including concave outlines, holes and
+  self-intersections, with `FillRule::EvenOdd` or `FillRule::NonZero`.
+  The edges are anti-aliased like the other shapes.
+- `Sense::FOCUSABLE` (combine it with `Sense::CLICK` or
+  `Sense::POINTER_DRAG` using `|`) for an area the app draws itself:
+  `Response::request_focus(ui)`, `Ui::request_focus`,
+  `Ui::take_tab` and `Ui::take_keyboard` let it take the keyboard, keep
+  Tab/Shift+Tab and receive Enter and Backspace.
+- `Modal::movable` and `Modal::position`: drag a dialog by its title bar
+  (or top strip) and choose where it starts.
+- `Frame::focus_window`: bring the main window (`None`) or an extra
+  window opened with `Frame::show_window` to the front.
+- `Harness::run_window_with_events`, `Harness::find_in_window` and
+  `Harness::click_in_window`: feed input to and click inside extra
+  windows in tests.
+
+### Fixed
+
+- Widgets that fill the width (a `ProgressBar`, a `TextEdit` with an
+  infinite desired width, a nested `Stack::fill_width`) stay inside their
+  item in a `Stack::row`/`column` instead of reaching the end of the
+  row. Items now get the space the layout assigned to them from the
+  second frame, as `Flex` items did.
+
+### Changed
+
+- `Shape` has a new `FilledPath` variant: code that matches every variant
+  exhaustively needs an arm for it (or a `_` arm).
 
 ## [0.20.0] — 2026-10-11
 
@@ -707,7 +739,8 @@ First release of **Rustroke**.
 - Scroll areas are vertical only; windows resize in width only; no submenus.
 - Desktop only (macOS, Windows, Linux); only tested on macOS so far.
 
-[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/AndreCusimano/rustroke/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/AndreCusimano/rustroke/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/AndreCusimano/rustroke/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/AndreCusimano/rustroke/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/AndreCusimano/rustroke/compare/v0.17.1...v0.18.0

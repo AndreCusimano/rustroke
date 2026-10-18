@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rustroke_core::{Color, DisplayList, Galley, InputState, Point, Rect, Vec2, vec2};
 use rustroke_text::{Fonts, IconId, IconLayer, RasterizedIcon, TextStyle};
 
-use crate::slots::Slots;
+use crate::slots::{SlotKind, Slots};
 use crate::widgets::{
     Button, Checkbox, Label, Numeric, RadioButton, SelectableLabel, Separator, Slider, Widget,
 };
@@ -159,6 +159,29 @@ impl<'a> Ui<'a> {
     /// [`InputState::consume_key`].
     pub fn input_mut(&mut self) -> &mut InputState {
         self.ctx.input_mut()
+    }
+
+    /// Gives keyboard focus to widget `id`, e.g. after clicking a custom
+    /// area the app draws. Takes effect this frame for widgets added
+    /// after the call, otherwise in the next one.
+    pub fn request_focus(&mut self, id: Id) {
+        self.ctx.request_focus(id);
+    }
+
+    /// The focused widget `id` handles Tab and Shift+Tab itself, so they
+    /// are left to it instead of moving the focus next frame. Call it
+    /// every frame for an app-drawn area that takes the keyboard (see
+    /// [`Sense::FOCUSABLE`]).
+    pub fn take_tab(&mut self, id: Id) {
+        self.ctx.set_tab_owner(id);
+    }
+
+    /// The focused widget `id` takes keyboard input: Escape is left to it
+    /// (instead of clearing the focus) and
+    /// [`Context::wants_keyboard_input`] is true. For app-drawn areas that
+    /// edit text themselves (see [`Sense::FOCUSABLE`]).
+    pub fn take_keyboard(&mut self, id: Id) {
+        self.ctx.set_keyboard_owner(id);
     }
 
     /// This Ui's id; widget ids are derived from it.
@@ -718,9 +741,20 @@ impl<'a> Ui<'a> {
         add_contents: impl FnOnce(&mut Ui<'_>) -> R,
     ) -> InnerResponse<R> {
         let prev_size: Option<Vec2> = self.ctx.data(id);
+        let known = self.slots.as_ref().is_some_and(|slots| slots.known());
         let slots = self.slots.as_mut().expect("in a stack or grid");
+        let slot = slots.slot_rect();
         let target = slots.place_child(prev_size.unwrap_or(Vec2::ZERO));
-        let child_rect = Rect::from_min_max(target.min, max_rect.max.max(target.min));
+        // Rows and columns give an item exactly the space the layout gave
+        // it (from the second frame, once its size is known), so widgets
+        // that fill the width stay inside it. Unmeasured items, and grid
+        // cells in content-sized columns, keep the extra room: their
+        // content has to be able to ask for its natural width.
+        let child_rect = if known && matches!(slots.kind, SlotKind::Line { .. }) {
+            slot
+        } else {
+            Rect::from_min_max(target.min, max_rect.max.max(target.min))
+        };
         let mut child = self.child_with_id(id, child_rect, layout);
         let inner = add_contents(&mut child);
         let used = child.min_rect();

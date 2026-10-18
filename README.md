@@ -27,7 +27,7 @@ keep in sync.
 
 ```toml
 [dependencies]
-rustroke = "0.20"
+rustroke = "0.21"
 ```
 
 A window with a label, in a couple of lines:
@@ -310,16 +310,18 @@ dialog.show(frame, |ui| {
   from the theme (line and accent colors), so one icon set fits light and
   dark themes.
 - **Drawing**: anti-aliased rectangles (rounded), circles, lines, polygons,
-  text and images, pixel-aligned on HiDPI screens; linear and radial
-  gradients, soft shadows, dashed and dotted lines, Bézier curves, 2D
-  transforms (rotated and sheared shapes, text and images), custom meshes
-  and animated images (GIF, APNG, WebP).
+  text and images, pixel-aligned on HiDPI screens; concave outlines and
+  holes with `DisplayList::path_filled` (even-odd or non-zero); linear and
+  radial gradients, soft shadows, dashed and dotted lines, Bézier curves,
+  2D transforms (rotated and sheared shapes, text and images), custom
+  meshes and animated images (GIF, APNG, WebP).
 - **Style**: dark and light themes, accent colors, animated transitions,
   changeable at runtime.
 - **Accessibility**: screen readers (VoiceOver, Narrator, Orca) through
   AccessKit.
 - **Mouse and keyboard**: clicks and drags with any button, Tab navigation,
-  Enter/Space activation, arrow keys, keyboard shortcuts shown in menus.
+  Enter/Space activation, arrow keys, keyboard shortcuts shown in menus;
+  custom areas drawn by the app take the keyboard with `Sense::FOCUSABLE`.
 - **Your own GPU rendering**: render a 3D viewport (or anything) with wgpu
   into your own texture and show it in the UI without copies, or draw with
   your own shaders inside the UI's render pass (paint callbacks).
@@ -328,8 +330,9 @@ dialog.show(frame, |ui| {
   bar and a tray icon (optional `native-menu` and `tray` features), system
   notifications.
 - **More windows**: extra native windows (e.g. a view on a second monitor),
-  sharing the app's state. On macOS the app can draw its own top bar next
-  to the window buttons (unified title bar).
+  sharing the app's state, brought to the front with
+  `Frame::focus_window`. On macOS the app can draw its own top bar next to
+  the window buttons (unified title bar).
 - **In the browser**: the same app compiles to WebAssembly and runs in a
   canvas with WebGPU or WebGL 2 (`tools/web.sh <example>` builds one).
 - **No GPU needed for tests**: a software renderer draws frames on the CPU
@@ -341,8 +344,8 @@ dialog.show(frame, |ui| {
   = / - / 0), a debugging inspector (Cmd/Ctrl+Alt+I), automation from
   another thread, and accessibility trees in headless tests.
 - **Testing**: run your app without a window, click widgets by label, type
-  text, check the result and render the frame to a PNG
-  (`rustroke::testing::Harness`).
+  text, click inside extra windows too, check the result and render the
+  frame to a PNG (`rustroke::testing::Harness`).
 
 Desktop: macOS, Windows, Linux. Minimum Rust version: 1.89.
 
@@ -524,7 +527,7 @@ The full guide is in the API docs: `cargo doc -p rustroke --open`.
 
 ## Status
 
-Version 0.20: widgets, stacks and grids, charts, tables and
+Version 0.21: widgets, stacks and grids, charts, tables and
 trees, code editing, rich text and Markdown, gradients and shadows, drag and drop, saved
 state, accessibility, desktop and browser builds. Everything is tested
 (interaction tests without a window, GPU and software snapshot tests, CI on

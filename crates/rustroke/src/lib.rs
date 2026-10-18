@@ -136,11 +136,18 @@
 //!   plus [`Gradient`] fills, soft [`Shadow`]s, dashed and dotted lines,
 //!   Bézier curves, app-built [`Mesh`]es and [`Transform`]s
 //!   (`DisplayList::with_transform`, `DisplayList::galley_transformed`).
+//!   [`DisplayList::path_filled`] fills concave outlines, holes and
+//!   self-intersections with [`FillRule::EvenOdd`] or
+//!   [`FillRule::NonZero`].
 //! - **Animated images**: [`load_animated_image`] (GIF, APNG, WebP) →
 //!   [`AnimatedTexture`] → [`AnimatedImage`].
 //! - **Accessibility**: widgets are exposed to screen readers (VoiceOver,
 //!   Narrator, Orca) through AccessKit. Custom widgets can describe
 //!   themselves with [`Ui::describe`].
+//! - **Custom widgets**: draw an area with `ui.interact` and
+//!   [`Sense::FOCUSABLE`], then [`Response::request_focus`],
+//!   [`Ui::take_tab`] and [`Ui::take_keyboard`] give it the keyboard
+//!   while it has focus (Tab between fields, Enter to confirm).
 //! - **Your own GPU rendering** (e.g. a 3D viewport): get rustroke's device
 //!   and queue with [`Frame::wgpu`], render into your texture and show it
 //!   with [`Frame::register_native_texture`] — no copies. Smaller custom
@@ -157,6 +164,8 @@
 //!   [`WindowOptions::unified_titlebar`] lets the app draw its own top bar
 //!   next to the window buttons. [`WindowOptions::resizable`] and
 //!   [`WindowOptions::min_inner_size`] limit resizing.
+//!   [`Frame::focus_window`] brings a window to the front;
+//!   [`Modal::movable`] and [`Modal::position`] place and move a dialog.
 //! - **Drag and drop**: [`Ui::dnd_drag_source`] (or
 //!   [`Ui::dnd_set_payload`] on any widget) and [`Ui::dnd_drop_zone`]
 //!   move payloads of any type between widgets; files dropped from the
@@ -166,8 +175,9 @@
 //!   `native-menu`), a tray icon ([`Frame::set_tray`], feature `tray`) and
 //!   system notifications ([`notify`]).
 //! - **More windows**: keep extra native windows open with
-//!   [`Frame::show_window`] (e.g. a view on a second monitor) and draw
-//!   them in [`App::update_window`].
+//!   [`Frame::show_window`] (e.g. a view on a second monitor), draw them
+//!   in [`App::update_window`] and bring one to the front with
+//!   [`Frame::focus_window`].
 //! - **In the browser**: the same app compiles to `wasm32-unknown-unknown`
 //!   and runs in a canvas with WebGPU or WebGL 2 (build an example with
 //!   `tools/web.sh <example>`).
@@ -175,8 +185,11 @@
 //!   click widgets by label, type text, press keys, inspect
 //!   [`Context::widgets`] and the accessibility tree, and render the
 //!   frame to an image on the GPU or, without one, with the
-//!   [`SoftwareRenderer`]. [`Context::automation`] drives a running app from
-//!   another thread the same way.
+//!   [`SoftwareRenderer`]. Extra windows get input with
+//!   [`testing::Harness::run_window_with_events`] and
+//!   [`testing::Harness::click_in_window`].
+//!   [`Context::automation`] drives a running app from another thread the
+//!   same way.
 //! - **Saving state** (feature `persistence`): with
 //!   [`WindowOptions::persistence_id`] window positions, panel sizes,
 //!   open sections, table columns and your own values
@@ -300,10 +313,10 @@
 //! API) and `rustroke-winit` (window and event loop).
 
 pub use rustroke_core::{
-    Color, ColorImage, DisplayList, Event, Galley, Gradient, GradientKind, ImeEvent, InputState,
-    Key, KeyboardShortcut, Mesh, Modifiers, POINTS_PER_SCROLL_LINE, PaintCallback, PhysicalSize,
-    Point, PointerButton, RawInput, Rect, Shadow, Shape, Stroke, TextureId, TexturesDelta,
-    Transform, Vec2, Vertex, point, vec2,
+    Color, ColorImage, DisplayList, Event, FillRule, Galley, Gradient, GradientKind, ImeEvent,
+    InputState, Key, KeyboardShortcut, Mesh, Modifiers, POINTS_PER_SCROLL_LINE, PaintCallback,
+    PhysicalSize, Point, PointerButton, RawInput, Rect, Shadow, Shape, Stroke, TextureId,
+    TexturesDelta, Transform, Vec2, Vertex, point, vec2,
 };
 /// Drawing on the CPU, without a GPU (see `testing::Harness::render_software`).
 pub use rustroke_soft::SoftwareRenderer;

@@ -67,6 +67,20 @@ impl PartialEq for PaintCallback {
     }
 }
 
+/// Which parts of a [`Shape::FilledPath`] are inside.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum FillRule {
+    /// A point is inside when a ray from it crosses an odd number of
+    /// edges: nested contours alternate between filled and empty, whatever
+    /// their direction (the usual way to draw a shape with holes).
+    #[default]
+    EvenOdd,
+    /// A point is inside when the winding number of the contours around it
+    /// is not zero: a hole is a contour wound the other way. Self-overlap
+    /// stays filled.
+    NonZero,
+}
+
 /// A primitive that can be drawn. Coordinates are in logical points.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
@@ -125,7 +139,8 @@ pub enum Shape {
     },
     /// A sequence of connected points.
     ///
-    /// `fill` is only drawn correctly for **convex** closed paths.
+    /// `fill` is only drawn correctly for **convex** closed paths; use
+    /// [`Shape::FilledPath`] for concave ones and holes.
     Path {
         /// The points, in order.
         points: Vec<Point>,
@@ -135,6 +150,18 @@ pub enum Shape {
         fill: Color,
         /// Outline ([`Stroke::NONE`] for none).
         stroke: Stroke,
+    },
+    /// One or more closed contours filled according to `fill_rule`
+    /// (concave outlines, holes, self-intersections). The edges are
+    /// anti-aliased like the other shapes.
+    FilledPath {
+        /// The contours, in any order and direction (see
+        /// [`FillRule`]).
+        contours: Vec<Vec<Point>>,
+        /// Interior color ([`Color::TRANSPARENT`] for none).
+        fill: Color,
+        /// Which parts of the contours are inside.
+        fill_rule: FillRule,
     },
     /// Drawing done by the renderer itself (see [`PaintCallback`]).
     Callback(PaintCallback),
@@ -194,6 +221,7 @@ impl Shape {
                 fade(fill);
                 fade(&mut stroke.color);
             }
+            Self::FilledPath { fill, .. } => fade(fill),
             Self::LineSegment { stroke, .. } => fade(&mut stroke.color),
             Self::Text { color, .. } => fade(color),
             Self::Image { tint, .. } => fade(tint),
@@ -234,6 +262,10 @@ impl Shape {
                 .iter()
                 .fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(*p, *p)))
                 .expand(half_width(stroke)),
+            Self::FilledPath { contours, .. } => contours
+                .iter()
+                .flatten()
+                .fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(*p, *p))),
             Self::Gradient { shape, .. } => shape.bounding_rect(),
             Self::Shadow {
                 rect, shadow: s, ..

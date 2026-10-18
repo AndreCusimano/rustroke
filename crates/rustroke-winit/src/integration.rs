@@ -232,6 +232,7 @@ impl Integration {
             windows: Vec::new(),
             window_id: None,
             close: false,
+            focus: None,
             titlebar_height: 0.0,
             storage: &mut self.storage,
             platform: Default::default(),
